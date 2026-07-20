@@ -1,0 +1,9 @@
+<component name="libraryTable">
+  <library name="PhoneAgent">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/PhoneAgent.zip!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

@@ -286,7 +286,6 @@
                         <div>📶 IP (SIM): <b class="ip-val"></b></div>
                         <div>🔒 IP (Tailscale): <b class="ts-ip-val" style="color: var(--cyan);"></b></div>
                         <div>🛡️ Proxy: <b class="proxy-val" style="color: var(--cyan);"></b></div>
-                        <div>🎯 Tap Proxy: <b class="coords-proxy"></b></div>
                     </div>
                     <div class="btn-grid">
                         <button class="btn-action" onclick="send(this, '${safeId}','START_TAILSCALE')">⚡ Tailscale</button>
@@ -304,7 +303,6 @@
 
             card.querySelector('.phone-name').innerHTML = `📱 ${safeName}`;
             card.querySelector('.group-tag').textContent = phone.group || 'Domyślna';
-            card.querySelector('.coords-proxy').textContent = `${phone.every_proxy_x ?? '-'}, ${phone.every_proxy_y ?? '-'}`;
 
             const badgeAgent = card.querySelector('.status-grid span:nth-child(1)');
             badgeAgent.className = `status-badge ${phone.online ? 'on' : 'off'}`;

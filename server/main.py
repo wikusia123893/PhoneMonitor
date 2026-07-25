@@ -626,12 +626,20 @@ def get_next_command(device_id: str):
 
     with CMD_LOCK:
         # Nie dawaj nowej komendy, dopóki poprzednia nie skończy — to psuje Proxy/Tailscale
-        if device_id in IN_FLIGHT:
-            return empty
+        running = IN_FLIGHT.get(device_id)
+        if running:
+            started = float(running.get("started_at") or running.get("created_at") or 0)
+            # Zacięta komenda (apkę zabito / brak done) — odblokuj po 90s
+            if started and (time.time() - started) > 90:
+                print(f"⚠️ [SERWER] Timeout IN_FLIGHT dla {device_id}, odblokowuję kolejkę")
+                IN_FLIGHT.pop(device_id, None)
+            else:
+                return empty
 
         for i, cmd in enumerate(COMMANDS):
             if cmd.get("device_id") == device_id:
                 selected = COMMANDS.pop(i)
+                selected["started_at"] = time.time()
                 IN_FLIGHT[device_id] = selected
                 print(
                     f">>> [SERWER] Wysyłam komendę do telefonu ({device_id}): "

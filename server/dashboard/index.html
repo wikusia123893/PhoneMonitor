@@ -49,6 +49,16 @@
 
         header { padding: 20px; text-align: center; position: relative; z-index: 10; }
         h1 { font-size: 2.5rem; font-weight: 700; letter-spacing: 3px; color: #fff; margin: 0; text-shadow: 0 0 25px var(--accent-glow), 0 0 50px rgba(236, 72, 153, 0.4); }
+
+        .toolbar {
+            max-width: 1300px; margin: 10px auto 0; padding: 0 40px;
+            display: flex; gap: 12px; flex-wrap: wrap; align-items: center; position: relative; z-index: 10;
+        }
+        .toolbar label { opacity: 0.75; font-size: 0.85rem; }
+        .toolbar select, .toolbar input {
+            padding: 10px 14px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.15);
+            background: rgba(0,0,0,0.4); color: white; font-family: inherit;
+        }
         
         #phones { 
             display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); 
@@ -66,7 +76,15 @@
         }
 
         .card:hover { transform: scale(1.02); border-color: rgba(168, 85, 247, 0.8); }
-        h2 { margin: 0 0 20px 0; font-size: 1.5rem; color: #fff; display: flex; justify-content: space-between; }
+        h2 { margin: 0 0 8px 0; font-size: 1.35rem; color: #fff; display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+        .phone-title { display: flex; flex-direction: column; gap: 4px; }
+        .group-tag {
+            display: inline-block; width: fit-content;
+            font-size: 0.7rem; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase;
+            padding: 4px 10px; border-radius: 999px; background: rgba(3, 218, 198, 0.15); color: var(--cyan);
+            border: 1px solid rgba(3, 218, 198, 0.35);
+        }
+        .device-id { font-size: 0.7rem; opacity: 0.45; word-break: break-all; margin-bottom: 14px; }
         
         .status-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 25px; }
         .status-badge { 
@@ -86,18 +104,33 @@
         button:hover:not(:disabled) { background: var(--accent); transform: translateY(-2px); }
         button:disabled { opacity: 0.3; cursor: not-allowed; transform: none !important; }
         .btn-ip { grid-column: span 2; background: linear-gradient(135deg, #03dac6, #00b3a6); color: #000; font-weight: 700; }
+        .btn-settings { background: rgba(236, 72, 153, 0.2); border-color: rgba(236, 72, 153, 0.4); }
 
-        input { 
+        input, select { 
             width: 100%; padding: 14px 18px; border-radius: 18px; border: 1px solid rgba(255,255,255,0.15); 
-            margin-top: 18px; background: rgba(0,0,0,0.4); color: white;
+            margin-top: 18px; background: rgba(0,0,0,0.4); color: white; font-family: inherit;
         }
+
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .form-field { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+        .form-field.full { grid-column: span 2; }
+        .form-field label { font-size: 0.75rem; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.4px; }
+        .form-field input { margin-top: 0; }
+        .hint { font-size: 0.75rem; opacity: 0.55; margin-top: 10px; line-height: 1.4; }
         
         .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); backdrop-filter: blur(15px); }
-        .modal-content { background: #180a29; margin: 8% auto; padding: 40px; border-radius: 40px; width: 90%; max-width: 450px; border: 1px solid var(--accent); }
+        .modal-content { background: #180a29; margin: 6% auto; padding: 40px; border-radius: 40px; width: 90%; max-width: 520px; border: 1px solid var(--accent); }
         
+        #historyContent { max-height: 300px; overflow-y: auto; margin-top: 15px; padding-right: 5px; }
+        .history-item { background: rgba(255,255,255,0.04); padding: 10px 15px; border-radius: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; font-size: 0.85rem; border: 1px solid rgba(255,255,255,0.06); }
+        .history-date { opacity: 0.6; font-size: 0.75rem; }
+        .history-ip { color: var(--cyan); font-weight: 600; }
+
         .ticker-wrap { position: fixed; top: 0; left: 0; width: 100%; background: rgba(0,0,0,0.8); padding: 12px 0; z-index: 100; border-bottom: 1px solid var(--pink); }
         .ticker { white-space: nowrap; animation: ticker 25s linear infinite; font-size: 0.85rem; color: var(--pink); }
         @keyframes ticker { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } }
+
+        .empty-state { opacity: 0.55; text-align: center; padding: 60px 20px; grid-column: 1 / -1; }
     </style>
 </head>
 <body>
@@ -107,107 +140,227 @@
 <div class="ticker-wrap"><div class="ticker">❤️ • NAPISZ COŚ MIŁEGO SWOJEJ DZIEWCZYNIE • ❤️ • NAPISZ COŚ MIŁEGO SWOJEJ DZIEWCZYNIE • ❤️</div></div>
 
 <header><h1>PHONE MONITOR PRO</h1></header>
+
+<div class="toolbar">
+    <label for="groupFilter">Grupa</label>
+    <select id="groupFilter" onchange="renderPhones()" style="width: auto; min-width: 180px; margin-top: 0;">
+        <option value="__all__">Wszystkie</option>
+    </select>
+    <label for="searchFilter">Szukaj</label>
+    <input id="searchFilter" oninput="renderPhones()" placeholder="nazwa / device id..." style="width: 220px; margin-top: 0;">
+</div>
+
 <div id="phones"></div>
 
 <div id="historyModal" class="modal">
     <div class="modal-content">
-        <span style="float:right; cursor:pointer;" onclick="closeModal()">✕</span>
+        <span style="float:right; cursor:pointer;" onclick="closeModal('historyModal')">✕</span>
         <h2>📜 Historia</h2>
-        <div id="historyContent"></div>
+        <div id="historyContent">Ładowanie...</div>
+    </div>
+</div>
+
+<div id="settingsModal" class="modal">
+    <div class="modal-content">
+        <span style="float:right; cursor:pointer;" onclick="closeModal('settingsModal')">✕</span>
+        <h2 style="margin-bottom: 8px;">⚙️ Ustawienia telefonu</h2>
+        <div class="device-id" id="settingsDeviceId"></div>
+
+        <div class="form-field full">
+            <label>Nazwa</label>
+            <input id="setName" placeholder="np. Xiaomi Salon">
+        </div>
+        <div class="form-field full">
+            <label>Grupa</label>
+            <input id="setGroup" placeholder="np. Farm A / Biuro / Test">
+        </div>
+
+        <div class="form-grid">
+            <div class="form-field">
+                <label>Every Proxy X</label>
+                <input id="setProxyX" type="number" min="0">
+            </div>
+            <div class="form-field">
+                <label>Every Proxy Y</label>
+                <input id="setProxyY" type="number" min="0">
+            </div>
+            <div class="form-field">
+                <label>Tailscale X</label>
+                <input id="setTsX" type="number" min="0">
+            </div>
+            <div class="form-field">
+                <label>Tailscale Y</label>
+                <input id="setTsY" type="number" min="0">
+            </div>
+        </div>
+
+        <p class="hint">
+            Na telefonie włącz opcję pokazującą współrzędne przy tapnięciu (np. Pointer location w opcjach deweloperskich),
+            tapnij przycisk Start w Every Proxy / Tailscale i wpisz tu X/Y. Każdy telefon ma własne wartości w bazie.
+        </p>
+
+        <button id="saveSettingsBtn" style="width:100%; margin-top:18px; background: linear-gradient(135deg, #a855f7, #7e22ce);" onclick="saveSettings()">💾 Zapisz</button>
     </div>
 </div>
 
 <script>
+    let phonesCache = [];
+    let currentSettingsDeviceId = null;
+
+    function escapeHtml(str) {
+        return String(str ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function updateGroupFilterOptions() {
+        const select = document.getElementById('groupFilter');
+        const current = select.value || '__all__';
+        const groups = [...new Set(phonesCache.map(p => p.group || 'Domyślna'))].sort((a, b) => a.localeCompare(b, 'pl'));
+        select.innerHTML = `<option value="__all__">Wszystkie</option>` +
+            groups.map(g => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join('');
+        select.value = groups.includes(current) || current === '__all__' ? current : '__all__';
+    }
+
+    function filteredPhones() {
+        const group = document.getElementById('groupFilter').value;
+        const q = (document.getElementById('searchFilter').value || '').trim().toLowerCase();
+        return phonesCache.filter(p => {
+            const okGroup = group === '__all__' || (p.group || 'Domyślna') === group;
+            const hay = `${p.name || ''} ${p.device_id || ''} ${p.group || ''}`.toLowerCase();
+            const okSearch = !q || hay.includes(q);
+            return okGroup && okSearch;
+        });
+    }
+
+    function renderPhones() {
+        const container = document.getElementById('phones');
+        const phones = filteredPhones();
+        const visibleIds = new Set(phones.map(p => p.device_id));
+
+        [...container.querySelectorAll('.card')].forEach(card => {
+            const id = card.id.replace('card_', '');
+            if (!visibleIds.has(id)) card.remove();
+        });
+
+        if (!phones.length) {
+            if (!container.querySelector('.empty-state')) {
+                container.innerHTML = `<div class="empty-state">Brak telefonów w tym filtrze. Zainstaluj agenta albo zmień grupę.</div>`;
+            }
+            return;
+        }
+
+        const empty = container.querySelector('.empty-state');
+        if (empty) empty.remove();
+
+        for (const phone of phones) {
+            let cardId = `card_${phone.device_id}`;
+            let card = document.getElementById(cardId);
+            const safeId = escapeHtml(phone.device_id);
+            const safeName = escapeHtml(phone.name || 'Telefon');
+            const safeGroup = escapeHtml(phone.group || 'Domyślna');
+
+            if (!card) {
+                card = document.createElement('div');
+                card.className = 'card';
+                card.id = cardId;
+                card.innerHTML = `
+                    <h2>
+                        <span class="phone-title">
+                            <span class="phone-name">📱 ${safeName}</span>
+                            <span class="group-tag">${safeGroup}</span>
+                        </span>
+                    </h2>
+                    <div class="device-id">ID: ${safeId}</div>
+                    <div class="status-grid">
+                        <span class="status-badge"></span>
+                        <span class="status-badge"></span>
+                        <span class="status-badge"></span>
+                    </div>
+                    <div style="font-size: 0.95rem; opacity: 0.9; margin-bottom: 20px; line-height: 1.8; background: rgba(0,0,0,0.25); padding: 15px 20px; border-radius: 20px;">
+                        <div>🔋 Bateria: <b class="battery-val"></b></div>
+                        <div>🌡️ Temperatura: <b class="temp-val"></b></div>
+                        <div>📶 IP (SIM): <b class="ip-val"></b></div>
+                        <div>🔒 IP (Tailscale): <b class="ts-ip-val" style="color: var(--cyan);"></b></div>
+                        <div>🛡️ Proxy: <b class="proxy-val" style="color: var(--cyan);"></b></div>
+                        <div>🎯 Tap Proxy: <b class="coords-proxy"></b></div>
+                    </div>
+                    <div class="btn-grid">
+                        <button class="btn-action" onclick="send(this, '${safeId}','START_TAILSCALE')">⚡ Tailscale</button>
+                        <button class="btn-action" onclick="send(this, '${safeId}','START_PROXY')">🛡️ Proxy</button>
+                        <button class="btn-ip btn-action" onclick="send(this, '${safeId}','CHANGE_IP')">🚀 Zmień IP</button>
+                        <button class="btn-action" onclick="send(this, '${safeId}','REBOOT')">🔄 Restart</button>
+                        <button class="btn-settings" onclick="openSettings('${safeId}')">⚙️ Ustawienia</button>
+                        <button style="background: rgba(168, 85, 247, 0.25);" onclick="showHistory('${safeId}', '${safeName}')">📊 Historia</button>
+                    </div>
+                    <input id="cmd_${safeId}" placeholder="💻 Komenda shell...">
+                    <button class="btn-action" style="width:100%; margin-top:15px; background: linear-gradient(135deg, #a855f7, #7e22ce);" onclick="sendShell(this, '${safeId}')">WYŚLIJ KOMENDĘ</button>
+                `;
+                container.appendChild(card);
+            }
+
+            card.querySelector('.phone-name').innerHTML = `📱 ${safeName}`;
+            card.querySelector('.group-tag').textContent = phone.group || 'Domyślna';
+            card.querySelector('.coords-proxy').textContent = `${phone.every_proxy_x ?? '-'}, ${phone.every_proxy_y ?? '-'}`;
+
+            const badgeAgent = card.querySelector('.status-grid span:nth-child(1)');
+            badgeAgent.className = `status-badge ${phone.online ? 'on' : 'off'}`;
+            badgeAgent.innerText = `Agent ${phone.online ? 'ON' : 'OFF'}`;
+            
+            const badgeTs = card.querySelector('.status-grid span:nth-child(2)');
+            badgeTs.className = `status-badge ${phone.tailscale ? 'on' : 'off'}`;
+            badgeTs.innerText = `TS ${phone.tailscale ? 'ON' : 'OFF'}`;
+
+            const badgePx = card.querySelector('.status-grid span:nth-child(3)');
+            badgePx.className = `status-badge ${phone.every_proxy ? 'on' : 'off'}`;
+            badgePx.innerText = `PX ${phone.every_proxy ? 'ON' : 'OFF'}`;
+
+            const batteryEl = card.querySelector('.battery-val');
+            const tempEl = card.querySelector('.temp-val');
+            const ipEl = card.querySelector('.ip-val');
+            const tsIpEl = card.querySelector('.ts-ip-val');
+            const proxyValEl = card.querySelector('.proxy-val');
+            const actionBtns = card.querySelectorAll('.btn-action');
+
+            if (!phone.online) {
+                card.style.opacity = "0.5";
+                card.style.borderColor = "#ef4444";
+                batteryEl.innerText = "OFFLINE";
+                batteryEl.style.color = "#ef4444";
+                tempEl.innerText = "---";
+                ipEl.innerText = "Brak połączenia (Rozłączony)";
+                ipEl.style.color = "#ef4444";
+                tsIpEl.innerText = "---";
+                tsIpEl.style.color = "#ef4444";
+                proxyValEl.innerText = "---";
+                proxyValEl.style.color = "#ef4444";
+                actionBtns.forEach(b => b.disabled = true);
+            } else {
+                card.style.opacity = "1";
+                card.style.borderColor = "rgba(255, 255, 255, 0.15)";
+                batteryEl.innerText = `${phone.battery || 0}%`;
+                batteryEl.style.color = (phone.battery < 20) ? '#ef4444' : '#4ade80';
+                tempEl.innerText = phone.battery_temp ? phone.battery_temp + '°C' : '---';
+                ipEl.innerText = phone.ip || "-";
+                ipEl.style.color = "var(--cyan)";
+                tsIpEl.innerText = phone.tailscale_ip || "Brak / Wyłączone";
+                tsIpEl.style.color = "var(--cyan)";
+                proxyValEl.innerText = phone.every_proxy_address || "Wyłączone";
+                proxyValEl.style.color = "var(--cyan)";
+                actionBtns.forEach(b => b.disabled = false);
+            }
+        }
+    }
+
     async function loadPhones() {
         try {
             let response = await fetch("/phones/");
-            let phones = await response.json();
-            const container = document.getElementById("phones");
-
-            for (const phone of phones) {
-                let cardId = `card_${phone.device_id}`;
-                let card = document.getElementById(cardId);
-
-                if (!card) {
-                    // TWORZENIE NOWEJ KARTY
-                    card = document.createElement('div');
-                    card.className = 'card';
-                    card.id = cardId;
-                    card.innerHTML = `
-                        <h2><span>📱 ${phone.name}</span></h2>
-                        <div class="status-grid">
-                            <span class="status-badge"></span>
-                            <span class="status-badge"></span>
-                            <span class="status-badge"></span>
-                        </div>
-                        <div style="font-size: 0.95rem; opacity: 0.9; margin-bottom: 20px; line-height: 1.8; background: rgba(0,0,0,0.25); padding: 15px 20px; border-radius: 20px;">
-                            <div>🔋 Bateria: <b class="battery-val"></b></div>
-                            <div>🌡️ Temperatura: <b class="temp-val"></b></div>
-                            <div>🌐 IP: <b class="ip-val"></b></div>
-                        </div>
-                        <div class="btn-grid">
-                            <button class="btn-action" onclick="send(this, '${phone.device_id}','START_TAILSCALE')">⚡ Tailscale</button>
-                            <button class="btn-action" onclick="send(this, '${phone.device_id}','START_PROXY')">🛡️ Proxy</button>
-                            <button class="btn-ip btn-action" onclick="send(this, '${phone.device_id}','CHANGE_IP')">🚀 Zmień IP</button>
-                            <button class="btn-action" onclick="send(this, '${phone.device_id}','REBOOT')">🔄 Restart</button>
-                            <button style="background: rgba(168, 85, 247, 0.25);" onclick="showHistory('${phone.device_id}', '${phone.name}')">📊 Historia</button>
-                        </div>
-                        <input id="cmd_${phone.device_id}" placeholder="💻 Komenda shell...">
-                        <button class="btn-action" style="width:100%; margin-top:15px; background: linear-gradient(135deg, #a855f7, #7e22ce);" onclick="sendShell(this, '${phone.device_id}')">WYŚLIJ KOMENDĘ</button>
-                    `;
-                    container.appendChild(card);
-                }
-
-                // AKTUALIZACJA DANYCH BEZ MIGANIA (Dla istniejących i nowych kart)
-                const badgeAgent = card.querySelector('.status-grid span:nth-child(1)');
-                badgeAgent.className = `status-badge ${phone.online ? 'on' : 'off'}`;
-                badgeAgent.innerText = `Agent ${phone.online ? 'ON' : 'OFF'}`;
-                
-                const badgeTs = card.querySelector('.status-grid span:nth-child(2)');
-                badgeTs.className = `status-badge ${phone.tailscale ? 'on' : 'off'}`;
-                badgeTs.innerText = `TS ${phone.tailscale ? 'ON' : 'OFF'}`;
-
-                const badgePx = card.querySelector('.status-grid span:nth-child(3)');
-                badgePx.className = `status-badge ${phone.every_proxy ? 'on' : 'off'}`;
-                badgePx.innerText = `PX ${phone.every_proxy ? 'ON' : 'OFF'}`;
-
-                const batteryEl = card.querySelector('.battery-val');
-                const tempEl = card.querySelector('.temp-val');
-                const ipEl = card.querySelector('.ip-val');
-                const actionBtns = card.querySelectorAll('.btn-action');
-
-                // KIEDY AGENT SIĘ ROZŁĄCZYŁ (OFFLINE)
-                if (!phone.online) {
-                    card.style.opacity = "0.5";
-                    card.style.borderColor = "#ef4444"; // Czerwone ostrzeżenie na ramce
-                    
-                    batteryEl.innerText = "OFFLINE";
-                    batteryEl.style.color = "#ef4444";
-                    
-                    tempEl.innerText = "---";
-                    
-                    ipEl.innerText = "Brak połączenia (Rozłączony)";
-                    ipEl.style.color = "#ef4444";
-                    
-                    // Blokujemy przyciski sterowania, żeby nie wysyłać w próżnię (Historia wciąż działa)
-                    actionBtns.forEach(b => b.disabled = true);
-                } 
-                // KIEDY AGENT JEST AKTYWNY (ONLINE)
-                else {
-                    card.style.opacity = "1";
-                    card.style.borderColor = "rgba(255, 255, 255, 0.15)";
-                    
-                    batteryEl.innerText = `${phone.battery || 0}%`;
-                    batteryEl.style.color = (phone.battery < 20) ? '#ef4444' : '#4ade80';
-                    
-                    tempEl.innerText = phone.battery_temp ? phone.battery_temp + '°C' : '---';
-                    
-                    ipEl.innerText = phone.ip || "-";
-                    ipEl.style.color = "var(--cyan)";
-                    
-                    actionBtns.forEach(b => b.disabled = false);
-                }
-            }
+            phonesCache = await response.json();
+            updateGroupFilterOptions();
+            renderPhones();
         } catch(e) { console.error("Błąd aktualizacji:", e); }
     }
 
@@ -248,16 +401,76 @@
 
     async function showHistory(deviceId, phoneName) { 
         document.getElementById("historyModal").style.display = "block";
+        const contentEl = document.getElementById("historyContent");
+        contentEl.innerHTML = "Ładowanie historii...";
         try {
             let res = await fetch("/phones/" + deviceId + "/history"); 
             let data = await res.json();
-            document.getElementById("historyContent").innerHTML = `Proxy: ${data.proxy ? data.proxy.length : 0} | Tailscale: ${data.tailscale ? data.tailscale.length : 0}`;
+            
+            if (data.ip_history && data.ip_history.length > 0) {
+                let html = "";
+                data.ip_history.forEach(item => {
+                    html += `<div class="history-item"><span class="history-ip">${item.ip}</span><span class="history-date">${item.date}</span></div>`;
+                });
+                contentEl.innerHTML = html;
+            } else {
+                contentEl.innerHTML = "<div style='text-align:center; opacity:0.6; padding: 20px;'>Brak zarejestrowanych zmian IP.</div>";
+            }
         } catch(e) {
-            document.getElementById("historyContent").innerHTML = "Brak danych historii.";
+            contentEl.innerHTML = "Błąd pobierania historii.";
+        }
+    }
+
+    function openSettings(deviceId) {
+        const phone = phonesCache.find(p => p.device_id === deviceId);
+        if (!phone) return;
+        currentSettingsDeviceId = deviceId;
+        document.getElementById('settingsDeviceId').textContent = `ID: ${deviceId}`;
+        document.getElementById('setName').value = phone.name || '';
+        document.getElementById('setGroup').value = phone.group || 'Domyślna';
+        document.getElementById('setProxyX').value = phone.every_proxy_x ?? 500;
+        document.getElementById('setProxyY').value = phone.every_proxy_y ?? 1000;
+        document.getElementById('setTsX').value = phone.tailscale_x ?? 500;
+        document.getElementById('setTsY').value = phone.tailscale_y ?? 1000;
+        document.getElementById('settingsModal').style.display = 'block';
+    }
+
+    async function saveSettings() {
+        if (!currentSettingsDeviceId) return;
+        const btn = document.getElementById('saveSettingsBtn');
+        const old = btn.innerText;
+        btn.innerText = '💾 Zapisuję...';
+        btn.disabled = true;
+        try {
+            const body = {
+                custom_name: document.getElementById('setName').value,
+                group_name: document.getElementById('setGroup').value,
+                every_proxy_x: Number(document.getElementById('setProxyX').value),
+                every_proxy_y: Number(document.getElementById('setProxyY').value),
+                tailscale_x: Number(document.getElementById('setTsX').value),
+                tailscale_y: Number(document.getElementById('setTsY').value),
+            };
+            const res = await fetch(`/devices/${currentSettingsDeviceId}/settings`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            btn.innerText = '✅ Zapisano';
+            await loadPhones();
+            setTimeout(() => {
+                closeModal('settingsModal');
+                btn.innerText = old;
+                btn.disabled = false;
+            }, 700);
+        } catch (e) {
+            console.error(e);
+            btn.innerText = '❌ Błąd';
+            setTimeout(() => { btn.innerText = old; btn.disabled = false; }, 1200);
         }
     }
     
-    function closeModal() { document.getElementById("historyModal").style.display = "none"; }
+    function closeModal(id) { document.getElementById(id).style.display = "none"; }
     
     loadPhones();
     setInterval(loadPhones, 2000);

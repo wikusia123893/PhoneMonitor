@@ -152,10 +152,6 @@
             <label>Nazwa</label>
             <input id="setName" placeholder="np. Xiaomi Salon">
         </div>
-        <div class="form-field full">
-            <label>Grupa</label>
-            <input id="setGroup" placeholder="np. Farm A / Biuro / Test">
-        </div>
 
         <div class="form-grid">
             <div class="form-field">
@@ -223,7 +219,6 @@
             let card = document.getElementById(cardId);
             const safeId = escapeHtml(phone.device_id);
             const safeName = escapeHtml(phone.name || 'Telefon');
-            const safeGroup = escapeHtml(phone.group || 'Domyślna');
 
             if (!card) {
                 card = document.createElement('div');
@@ -233,7 +228,6 @@
                     <h2>
                         <span class="phone-title">
                             <span class="phone-name">📱 ${safeName}</span>
-                            <span class="group-tag">${safeGroup}</span>
                         </span>
                     </h2>
                     <div class="device-id">ID: ${safeId}</div>
@@ -265,7 +259,6 @@
             }
 
             card.querySelector('.phone-name').innerHTML = `📱 ${safeName}`;
-            card.querySelector('.group-tag').textContent = phone.group || 'Domyślna';
 
             const badgeAgent = card.querySelector('.status-grid span:nth-child(1)');
             badgeAgent.className = `status-badge ${phone.online ? 'on' : 'off'}`;
@@ -387,7 +380,6 @@
         currentSettingsDeviceId = deviceId;
         document.getElementById('settingsDeviceId').textContent = `ID: ${deviceId}`;
         document.getElementById('setName').value = phone.name || '';
-        document.getElementById('setGroup').value = phone.group || 'Domyślna';
         document.getElementById('setProxyX').value = phone.every_proxy_x ?? 500;
         document.getElementById('setProxyY').value = phone.every_proxy_y ?? 1000;
         document.getElementById('setTsX').value = phone.tailscale_x ?? 500;
@@ -404,7 +396,6 @@
         try {
             const body = {
                 custom_name: document.getElementById('setName').value,
-                group_name: document.getElementById('setGroup').value,
                 every_proxy_x: Number(document.getElementById('setProxyX').value),
                 every_proxy_y: Number(document.getElementById('setProxyY').value),
                 tailscale_x: Number(document.getElementById('setTsX').value),

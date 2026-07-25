@@ -97,6 +97,7 @@
         .off { background: rgba(255, 255, 255, 0.08); color: #aaa; }
         
         .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 20px; }
+        .btn-grid .btn-ip { grid-column: span 2; }
         button { 
             padding: 14px; border: none; border-radius: 18px; cursor: pointer; font-weight: 600; font-size: 0.8rem;
             background: rgba(255,255,255,0.08); color: white; transition: all 0.3s; border: 1px solid rgba(255,255,255,0.1);
@@ -293,6 +294,7 @@
                         <button class="btn-ip btn-action" onclick="send(this, '${safeId}','CHANGE_IP')">🚀 Zmień IP</button>
                         <button class="btn-action" onclick="send(this, '${safeId}','REBOOT')">🔄 Restart</button>
                         <button class="btn-settings" onclick="openSettings('${safeId}')">⚙️ Ustawienia</button>
+                        <button class="btn-action" onclick="send(this, '${safeId}','CALIBRATE')">🎯 Kalibruj</button>
                         <button style="background: rgba(168, 85, 247, 0.25);" onclick="showHistory('${safeId}', '${safeName}')">📊 Historia</button>
                     </div>
                     <input id="cmd_${safeId}" placeholder="💻 Komenda shell...">

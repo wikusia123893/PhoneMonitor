@@ -47,10 +47,21 @@ def init_db():
             every_proxy_y INTEGER DEFAULT 1000,
             tailscale_x INTEGER DEFAULT 500,
             tailscale_y INTEGER DEFAULT 1000,
+            proxy_calibrated INTEGER DEFAULT 0,
+            tailscale_calibrated INTEGER DEFAULT 0,
             is_active BOOLEAN DEFAULT 1,
             last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    # Migracja dla starszych baz
+    for col, typ in [
+        ("proxy_calibrated", "INTEGER DEFAULT 0"),
+        ("tailscale_calibrated", "INTEGER DEFAULT 0"),
+    ]:
+        try:
+            cursor.execute(f"ALTER TABLE devices ADD COLUMN {col} {typ}")
+        except sqlite3.OperationalError:
+            pass
     conn.commit()
     conn.close()
 
@@ -73,7 +84,8 @@ def db_get_device(device_id: str):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT custom_name, group_name, every_proxy_x, every_proxy_y, tailscale_x, tailscale_y
+        SELECT custom_name, group_name, every_proxy_x, every_proxy_y, tailscale_x, tailscale_y,
+               COALESCE(proxy_calibrated, 0), COALESCE(tailscale_calibrated, 0)
         FROM devices WHERE device_id = ?
     ''', (device_id,))
     row = cursor.fetchone()
@@ -87,6 +99,8 @@ def db_get_device(device_id: str):
         "every_proxy_y": row[3],
         "tailscale_x": row[4],
         "tailscale_y": row[5],
+        "proxy_calibrated": bool(row[6]),
+        "tailscale_calibrated": bool(row[7]),
     }
 
 
@@ -127,21 +141,55 @@ def db_update_meta(device_id: str, custom_name: str = None, group_name: str = No
     conn.close()
 
 
-def db_update_coords(device_id: str, every_proxy_x: int, every_proxy_y: int, tailscale_x: int, tailscale_y: int):
-    """Zapisuje współrzędne tap tap dla urządzenia."""
+def db_update_coords(
+    device_id: str,
+    every_proxy_x: int = None,
+    every_proxy_y: int = None,
+    tailscale_x: int = None,
+    tailscale_y: int = None,
+    mark_proxy_calibrated: bool = False,
+    mark_tailscale_calibrated: bool = False,
+):
+    """Zapisuje współrzędne (pełne lub częściowe) dla urządzenia."""
+    db_register_device(device_id)
+    current = db_get_coords(device_id)
+    px_x = every_proxy_x if every_proxy_x is not None else current["every_proxy_x"]
+    px_y = every_proxy_y if every_proxy_y is not None else current["every_proxy_y"]
+    ts_x = tailscale_x if tailscale_x is not None else current["tailscale_x"]
+    ts_y = tailscale_y if tailscale_y is not None else current["tailscale_y"]
+
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO devices (device_id, every_proxy_x, every_proxy_y, tailscale_x, tailscale_y)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO devices (
+            device_id, every_proxy_x, every_proxy_y, tailscale_x, tailscale_y,
+            proxy_calibrated, tailscale_calibrated
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(device_id) DO UPDATE SET
             every_proxy_x = excluded.every_proxy_x,
             every_proxy_y = excluded.every_proxy_y,
             tailscale_x = excluded.tailscale_x,
-            tailscale_y = excluded.tailscale_y
-    ''', (device_id, every_proxy_x, every_proxy_y, tailscale_x, tailscale_y))
+            tailscale_y = excluded.tailscale_y,
+            proxy_calibrated = CASE
+                WHEN ? THEN 1 ELSE devices.proxy_calibrated END,
+            tailscale_calibrated = CASE
+                WHEN ? THEN 1 ELSE devices.tailscale_calibrated END
+    ''', (
+        device_id, px_x, px_y, ts_x, ts_y,
+        1 if mark_proxy_calibrated else 0,
+        1 if mark_tailscale_calibrated else 0,
+        1 if mark_proxy_calibrated else 0,
+        1 if mark_tailscale_calibrated else 0,
+    ))
     conn.commit()
     conn.close()
+    return {
+        "every_proxy_x": px_x,
+        "every_proxy_y": px_y,
+        "tailscale_x": ts_x,
+        "tailscale_y": ts_y,
+    }
 
 
 def ensure_runtime_state(device_id: str, default_name: str = None):
@@ -247,6 +295,8 @@ def get_phones():
                 "every_proxy_y": meta.get("every_proxy_y", 1000),
                 "tailscale_x": meta.get("tailscale_x", 500),
                 "tailscale_y": meta.get("tailscale_y", 1000),
+                "proxy_calibrated": meta.get("proxy_calibrated", False),
+                "tailscale_calibrated": meta.get("tailscale_calibrated", False),
             }
         )
 
@@ -305,24 +355,35 @@ async def set_device_meta(device_id: str, request: Request):
 
 @app.post("/devices/{device_id}/coords")
 async def set_device_coords(device_id: str, request: Request):
-    """API pozwalające ustawić z poziomu dashboardu unikalne współrzędne tap tap dla telefonu."""
+    """Zapis współrzędnych z dashboardu lub auto-kalibracji agenta (partial OK)."""
     data = await request.json()
-    px_x = int(data.get("every_proxy_x", 500))
-    px_y = int(data.get("every_proxy_y", 1000))
-    ts_x = int(data.get("tailscale_x", 500))
-    ts_y = int(data.get("tailscale_y", 1000))
 
-    db_register_device(device_id)
-    db_update_coords(device_id, px_x, px_y, ts_x, ts_y)
+    px_x = int(data["every_proxy_x"]) if "every_proxy_x" in data and data["every_proxy_x"] is not None else None
+    px_y = int(data["every_proxy_y"]) if "every_proxy_y" in data and data["every_proxy_y"] is not None else None
+    ts_x = int(data["tailscale_x"]) if "tailscale_x" in data and data["tailscale_x"] is not None else None
+    ts_y = int(data["tailscale_y"]) if "tailscale_y" in data and data["tailscale_y"] is not None else None
+
+    mark_proxy = bool(data.get("proxy_calibrated")) or (px_x is not None and px_y is not None)
+    mark_ts = bool(data.get("tailscale_calibrated")) or (ts_x is not None and ts_y is not None)
+
+    saved = db_update_coords(
+        device_id,
+        every_proxy_x=px_x,
+        every_proxy_y=px_y,
+        tailscale_x=ts_x,
+        tailscale_y=ts_y,
+        mark_proxy_calibrated=mark_proxy and px_x is not None,
+        mark_tailscale_calibrated=mark_ts and ts_x is not None,
+    )
     ensure_runtime_state(device_id)
+    meta = db_get_device(device_id) or {}
 
     return {
         "status": "ok",
-        "message": f"Zapisano nowe współrzędne dla {device_id}",
-        "every_proxy_x": px_x,
-        "every_proxy_y": px_y,
-        "tailscale_x": ts_x,
-        "tailscale_y": ts_y,
+        "message": f"Zapisano współrzędne dla {device_id}",
+        **saved,
+        "proxy_calibrated": meta.get("proxy_calibrated", False),
+        "tailscale_calibrated": meta.get("tailscale_calibrated", False),
     }
 
 
@@ -340,7 +401,15 @@ async def set_device_settings(device_id: str, request: Request):
 
     db_register_device(device_id)
     db_update_meta(device_id, custom_name=custom_name, group_name=group_name)
-    db_update_coords(device_id, px_x, px_y, ts_x, ts_y)
+    db_update_coords(
+        device_id,
+        every_proxy_x=px_x,
+        every_proxy_y=px_y,
+        tailscale_x=ts_x,
+        tailscale_y=ts_y,
+        mark_proxy_calibrated=True,
+        mark_tailscale_calibrated=True,
+    )
 
     state = ensure_runtime_state(device_id)
     if custom_name is not None:

@@ -1,7 +1,9 @@
 from datetime import datetime
+import itertools
 import json
 import os
 import sqlite3
+import threading
 import time
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,8 +28,68 @@ IP_FILE = os.path.join(BASE_DIR, "used_ips.json")
 IP_HISTORY_FILE = os.path.join(BASE_DIR, "ip_change_history.json")
 DB_FILE = os.path.join(BASE_DIR, "devices.db")
 
-COMMANDS = []
+COMMANDS = []  # kolejka oczekujących
+IN_FLIGHT = {}  # device_id -> komenda aktualnie u telefonu
+CMD_LOCK = threading.RLock()
+CMD_SEQ = itertools.count(1)
 DEVICES_STATE = {}
+
+# Komendy UI nie mogą się nakładać — inaczej Proxy/Tailscale/Kalibracja się mieszają
+UI_COMMANDS = {"START_PROXY", "START_TAILSCALE", "CALIBRATE"}
+
+
+def new_command_id() -> int:
+    return int(time.time() * 1000) * 1000 + (next(CMD_SEQ) % 1000)
+
+
+def phone_name(device_id: str) -> str:
+    try:
+        meta = db_get_device(device_id)
+        if meta and meta.get("custom_name"):
+            return meta["custom_name"]
+    except Exception:
+        pass
+    state = DEVICES_STATE.get(device_id) or {}
+    return state.get("name") or f"Telefon_{str(device_id)[:6]}"
+
+
+def queue_snapshot():
+    with CMD_LOCK:
+        pending_raw = list(COMMANDS)
+        inflight_raw = list(IN_FLIGHT.items())
+    pending = [
+        {
+            **cmd,
+            "status": "pending",
+            "phone_name": phone_name(cmd.get("device_id", "")),
+        }
+        for cmd in pending_raw
+    ]
+    inflight = [
+        {
+            **cmd,
+            "status": "running",
+            "phone_name": phone_name(dev_id),
+        }
+        for dev_id, cmd in inflight_raw
+    ]
+    return {
+        "pending": pending,
+        "running": inflight,
+        "count": len(pending) + len(inflight),
+    }
+
+
+def clear_in_flight(command_id=None, device_id=None):
+    with CMD_LOCK:
+        if device_id and device_id in IN_FLIGHT:
+            if command_id is None or IN_FLIGHT[device_id].get("id") == command_id:
+                IN_FLIGHT.pop(device_id, None)
+                return
+        if command_id is not None:
+            for did, cmd in list(IN_FLIGHT.items()):
+                if cmd.get("id") == command_id:
+                    IN_FLIGHT.pop(did, None)
 
 
 # ==========================================
@@ -429,19 +491,69 @@ async def set_device_settings(device_id: str, request: Request):
     }
 
 
+@app.get("/commands/queue")
+def get_commands_queue():
+    return queue_snapshot()
+
+
+@app.delete("/commands/{command_id}")
+def cancel_command(command_id: int):
+    removed = None
+    with CMD_LOCK:
+        for i, cmd in enumerate(COMMANDS):
+            if cmd.get("id") == command_id:
+                removed = COMMANDS.pop(i)
+                break
+        if removed is None:
+            for did, cmd in list(IN_FLIGHT.items()):
+                if cmd.get("id") == command_id:
+                    # Już u telefonu — tylko odznaczamy blokadę kolejki
+                    removed = IN_FLIGHT.pop(did, None)
+                    break
+    if not removed:
+        return {"status": "error", "message": "Nie znaleziono komendy"}
+    print(f">>> [SERWER] Anulowano komendę ID {command_id}: {removed.get('command')}")
+    return {"status": "ok", "cancelled": removed, **queue_snapshot()}
+
+
+@app.post("/commands/clear")
+async def clear_commands(request: Request):
+    data = {}
+    try:
+        data = await request.json()
+    except Exception:
+        pass
+    device_id = data.get("device_id")
+    with CMD_LOCK:
+        if device_id:
+            before = len(COMMANDS)
+            COMMANDS[:] = [c for c in COMMANDS if c.get("device_id") != device_id]
+            IN_FLIGHT.pop(device_id, None)
+            cleared = before - len(COMMANDS)
+        else:
+            cleared = len(COMMANDS)
+            COMMANDS.clear()
+            IN_FLIGHT.clear()
+    print(f">>> [SERWER] Wyczyszczono kolejkę ({cleared}), device={device_id or 'ALL'}")
+    return {"status": "ok", "cleared": cleared, **queue_snapshot()}
+
+
 @app.post("/commands/add")
 async def add_command(request: Request):
     data = await request.json()
-    data["id"] = int(time.time() * 1000)
+    data["id"] = new_command_id()
+    data["created_at"] = time.time()
+    data.setdefault("payload", "")
+    data.setdefault("executed", False)
 
     dev_id = data.get("device_id")
     if not dev_id:
         return {"status": "error", "message": "Brak device_id"}
 
-    cmd = data.get("command")
+    cmd = (data.get("command") or "").upper()
+    data["command"] = cmd
     ensure_runtime_state(dev_id)
 
-    # Dołączamy spersonalizowane współrzędne tap tap na podstawie bazy danych
     coords = db_get_coords(dev_id)
     if cmd == "START_PROXY":
         data["tap_x"] = coords["every_proxy_x"]
@@ -453,9 +565,48 @@ async def add_command(request: Request):
     if dev_id in DEVICES_STATE:
         DEVICES_STATE[dev_id]["last_seen"] = time.time()
 
-    COMMANDS.append(data)
+    with CMD_LOCK:
+        # Deduplikacja: nie dokładaj 2x tej samej komendy UI dla tego telefonu
+        if cmd in UI_COMMANDS:
+            COMMANDS[:] = [
+                c for c in COMMANDS
+                if not (c.get("device_id") == dev_id and c.get("command") == cmd)
+            ]
+            # Kalibracja czyści inne UI z kolejki — inaczej się gryzą
+            if cmd == "CALIBRATE":
+                COMMANDS[:] = [
+                    c for c in COMMANDS
+                    if not (c.get("device_id") == dev_id and c.get("command") in UI_COMMANDS)
+                ]
+            # Proxy/Tailscale nie dokładaj gdy telefon już robi UI albo kalibrację
+            running = IN_FLIGHT.get(dev_id)
+            if running and running.get("command") in UI_COMMANDS:
+                if cmd != running.get("command"):
+                    # pozwól dopisać do kolejki, ale nie dubluj tego samego
+                    pass
+            pending_ui = [
+                c for c in COMMANDS
+                if c.get("device_id") == dev_id and c.get("command") in UI_COMMANDS
+            ]
+            # Max 1 UI w kolejce + 1 running — odrzuć spam kliknięć
+            if len(pending_ui) >= 2:
+                return {
+                    "status": "error",
+                    "message": "Za dużo komend UI w kolejce — anuluj zbędne w panelu Kolejka",
+                    **queue_snapshot(),
+                }
+
+        COMMANDS.append(data)
+
     print(f"\n>>> [SERWER] Dodano komendę z ID {data['id']}: {cmd} (Urządzenie: {dev_id}) tap=({data.get('tap_x')},{data.get('tap_y')})")
-    return {"status": "ok", "tap_x": data.get("tap_x"), "tap_y": data.get("tap_y")}
+    snap = queue_snapshot()
+    return {
+        "status": "ok",
+        "id": data["id"],
+        "tap_x": data.get("tap_x"),
+        "tap_y": data.get("tap_y"),
+        **snap,
+    }
 
 
 @app.get("/commands/next/{device_id}")
@@ -463,14 +614,7 @@ def get_next_command(device_id: str):
     ensure_runtime_state(device_id)
     DEVICES_STATE[device_id]["last_seen"] = time.time()
 
-    # Ważne: każdy telefon dostaje tylko swoje komendy
-    for i, cmd in enumerate(COMMANDS):
-        if cmd.get("device_id") == device_id:
-            selected = COMMANDS.pop(i)
-            print(f">>> [SERWER] Wysyłam komendę do telefonu ({device_id}): {selected.get('command')} tap=({selected.get('tap_x')},{selected.get('tap_y')})")
-            return selected
-
-    return {
+    empty = {
         "id": 0,
         "device_id": device_id,
         "command": "",
@@ -479,6 +623,23 @@ def get_next_command(device_id: str):
         "tap_x": None,
         "tap_y": None,
     }
+
+    with CMD_LOCK:
+        # Nie dawaj nowej komendy, dopóki poprzednia nie skończy — to psuje Proxy/Tailscale
+        if device_id in IN_FLIGHT:
+            return empty
+
+        for i, cmd in enumerate(COMMANDS):
+            if cmd.get("device_id") == device_id:
+                selected = COMMANDS.pop(i)
+                IN_FLIGHT[device_id] = selected
+                print(
+                    f">>> [SERWER] Wysyłam komendę do telefonu ({device_id}): "
+                    f"{selected.get('command')} tap=({selected.get('tap_x')},{selected.get('tap_y')})"
+                )
+                return selected
+
+    return empty
 
 
 @app.post("/commands/done")
@@ -489,6 +650,7 @@ async def command_done(request: Request):
     message = data.get("message") or data.get("result")
     device_id = data.get("device_id")
 
+    clear_in_flight(command_id=command_id, device_id=device_id)
     print(f">>> [SERWER] Wykonano komendę ID: {command_id}, wynik: {status}, IP: {message}")
 
     if status == "SUCCESS" and message:
@@ -504,13 +666,15 @@ async def command_done(request: Request):
                 print(f"⚠️ [IP MANAGER] Adres {new_ip} był używany w ciągu ostatnich 7 dni! Ponawiam zmianę...")
                 if device_id:
                     retry_cmd = {
-                        "id": int(time.time() * 1000),
+                        "id": new_command_id(),
                         "device_id": device_id,
                         "command": "CHANGE_IP",
                         "payload": "",
                         "executed": False,
+                        "created_at": time.time(),
                     }
-                    COMMANDS.append(retry_cmd)
+                    with CMD_LOCK:
+                        COMMANDS.append(retry_cmd)
             else:
                 print(f"✅ [IP MANAGER] Nowe unikalne IP: {new_ip}. Zapisuję do historii.")
                 ip_db[new_ip] = now
@@ -524,7 +688,7 @@ async def command_done(request: Request):
                 if device_id and device_id in DEVICES_STATE:
                     DEVICES_STATE[device_id]["ip"] = new_ip
 
-    return {"status": "ok"}
+    return {"status": "ok", **queue_snapshot()}
 
 
 @app.get("/ip/check")

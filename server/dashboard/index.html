@@ -116,6 +116,38 @@
         @keyframes ticker { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } }
 
         .empty-state { opacity: 0.55; text-align: center; padding: 60px 20px; grid-column: 1 / -1; }
+
+        .queue-bar {
+            max-width: 1300px; margin: 0 auto; padding: 0 40px 10px; position: relative; z-index: 20;
+        }
+        .queue-toggle {
+            width: 100%; display: flex; justify-content: space-between; align-items: center;
+            padding: 14px 20px; border-radius: 18px; background: rgba(0,0,0,0.45);
+            border: 1px solid rgba(255,255,255,0.15); cursor: pointer; font-weight: 600;
+        }
+        .queue-toggle:hover { border-color: var(--accent); background: rgba(168,85,247,0.15); }
+        .queue-badge {
+            min-width: 28px; height: 28px; border-radius: 999px; background: var(--pink);
+            display: inline-flex; align-items: center; justify-content: center; font-size: 0.8rem;
+        }
+        .queue-badge.zero { background: rgba(255,255,255,0.12); }
+        #queuePanel {
+            display: none; margin-top: 12px; padding: 18px; border-radius: 22px;
+            background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.12);
+        }
+        #queuePanel.open { display: block; }
+        .queue-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+        .queue-actions button { padding: 10px 14px; font-size: 0.75rem; }
+        .queue-item {
+            display: flex; justify-content: space-between; align-items: center; gap: 12px;
+            padding: 12px 14px; margin-bottom: 8px; border-radius: 14px;
+            background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+            font-size: 0.85rem;
+        }
+        .queue-item .meta { opacity: 0.65; font-size: 0.75rem; }
+        .queue-item.running { border-color: rgba(3,218,198,0.45); }
+        .queue-item button { padding: 8px 12px; font-size: 0.72rem; background: rgba(239,68,68,0.25); border-color: rgba(239,68,68,0.45); }
+        .queue-empty { opacity: 0.55; text-align: center; padding: 16px; }
     </style>
 </head>
 <body>
@@ -125,6 +157,20 @@
 <div class="ticker-wrap"><div class="ticker">❤️ • NAPISZ COŚ MIŁEGO SWOJEJ DZIEWCZYNIE • ❤️ • NAPISZ COŚ MIŁEGO SWOJEJ DZIEWCZYNIE • ❤️</div></div>
 
 <header><h1>PHONE MONITOR PRO</h1></header>
+
+<div class="queue-bar">
+    <button class="queue-toggle" type="button" onclick="toggleQueuePanel()">
+        <span>📋 Kolejka komend</span>
+        <span class="queue-badge zero" id="queueBadge">0</span>
+    </button>
+    <div id="queuePanel">
+        <div class="queue-actions">
+            <button type="button" onclick="clearQueue()">🧹 Wyczyść całą kolejkę</button>
+            <button type="button" onclick="loadQueue()">🔄 Odśwież</button>
+        </div>
+        <div id="queueList" class="queue-empty">Brak komend w kolejce.</div>
+    </div>
+</div>
 
 <div id="phones"></div>
 
@@ -178,6 +224,9 @@
 <script>
     let phonesCache = [];
     let currentSettingsDeviceId = null;
+    let queueOpen = false;
+    let queueCache = { pending: [], running: [], count: 0 };
+    const sendLocks = new Set(); // device_id:command — anty-spam kliknięć
 
     function escapeHtml(str) {
         return String(str ?? '')
@@ -186,6 +235,70 @@
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#39;');
+    }
+
+    function toggleQueuePanel() {
+        queueOpen = !queueOpen;
+        document.getElementById('queuePanel').classList.toggle('open', queueOpen);
+        if (queueOpen) loadQueue();
+    }
+
+    async function loadQueue() {
+        try {
+            const res = await fetch('/commands/queue');
+            queueCache = await res.json();
+            renderQueue();
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    function renderQueue() {
+        const badge = document.getElementById('queueBadge');
+        const list = document.getElementById('queueList');
+        const count = queueCache.count || 0;
+        badge.textContent = count;
+        badge.classList.toggle('zero', count === 0);
+
+        const items = [...(queueCache.running || []), ...(queueCache.pending || [])];
+        if (!items.length) {
+            list.className = 'queue-empty';
+            list.innerHTML = 'Brak komend w kolejce.';
+            return;
+        }
+        list.className = '';
+        list.innerHTML = items.map(item => {
+            const running = item.status === 'running';
+            const name = escapeHtml(item.phone_name || item.device_id || '?');
+            const cmd = escapeHtml(item.command || '?');
+            const id = item.id;
+            return `<div class="queue-item ${running ? 'running' : ''}">
+                <div>
+                    <div><b>${cmd}</b> → ${name}</div>
+                    <div class="meta">${running ? '▶ WYKONYWANA' : '⏳ czeka'} · id ${id}</div>
+                </div>
+                <button type="button" onclick="cancelCommand(${id})">${running ? 'Odblokuj' : 'Anuluj'}</button>
+            </div>`;
+        }).join('');
+    }
+
+    async function cancelCommand(id) {
+        try {
+            await fetch('/commands/' + id, { method: 'DELETE' });
+            await loadQueue();
+        } catch (e) { console.error(e); }
+    }
+
+    async function clearQueue() {
+        if (!confirm('Wyczyścić całą kolejkę komend?')) return;
+        try {
+            await fetch('/commands/clear', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
+            await loadQueue();
+        } catch (e) { console.error(e); }
     }
 
     function renderPhones() {
@@ -308,41 +421,60 @@
             let response = await fetch("/phones/");
             phonesCache = await response.json();
             renderPhones();
+            await loadQueue();
         } catch(e) { console.error("Błąd aktualizacji:", e); }
     }
 
-    async function send(btn, device, command){ 
+    async function send(btn, device, command){
+        const lockKey = device + ':' + command;
+        if (sendLocks.has(lockKey)) return;
+        sendLocks.add(lockKey);
+
         const oldText = btn.innerText;
         btn.innerText = "⏳..."; btn.disabled = true;
-        try { 
-            await fetch("/commands/add",{ 
-                method:"POST", 
-                headers:{"Content-Type":"application/json"}, 
-                body:JSON.stringify({ device_id:device, command:command, payload:"" }) 
-            }); 
-        } catch(e) { console.error(e); }
-        setTimeout(() => { 
-            btn.innerText = "✅"; 
-            setTimeout(() => { btn.innerText = oldText; btn.disabled = false; loadPhones(); }, 1000); 
-        }, 500);
+        try {
+            const res = await fetch("/commands/add",{
+                method:"POST",
+                headers:{"Content-Type":"application/json"},
+                body:JSON.stringify({ device_id:device, command:command, payload:"" })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (data.status === 'error') {
+                btn.innerText = "⚠️";
+                alert(data.message || 'Nie dodano komendy');
+            } else {
+                btn.innerText = "✅";
+            }
+            await loadQueue();
+        } catch(e) {
+            console.error(e);
+            btn.innerText = "❌";
+        }
+        setTimeout(() => {
+            btn.innerText = oldText;
+            btn.disabled = false;
+            sendLocks.delete(lockKey);
+            loadPhones();
+        }, 2500);
     }
 
-    async function sendShell(btn, device){ 
+    async function sendShell(btn, device){
         const inputEl = document.getElementById("cmd_" + device);
         const payload = inputEl.value;
         const oldText = btn.innerText;
         btn.innerText = "🚀..."; btn.disabled = true;
-        try { 
-            await fetch("/commands/add",{ 
-                method:"POST", 
-                headers:{"Content-Type":"application/json"}, 
-                body:JSON.stringify({ device_id:device, command:"SHELL", payload:payload }) 
-            }); 
-            inputEl.value = ""; 
+        try {
+            await fetch("/commands/add",{
+                method:"POST",
+                headers:{"Content-Type":"application/json"},
+                body:JSON.stringify({ device_id:device, command:"SHELL", payload:payload })
+            });
+            inputEl.value = "";
+            await loadQueue();
         } catch(e) { console.error(e); }
-        setTimeout(() => { 
-            btn.innerText = "✅"; 
-            setTimeout(() => { btn.innerText = oldText; btn.disabled = false; loadPhones(); }, 1000); 
+        setTimeout(() => {
+            btn.innerText = "✅";
+            setTimeout(() => { btn.innerText = oldText; btn.disabled = false; loadPhones(); }, 1000);
         }, 500);
     }
 

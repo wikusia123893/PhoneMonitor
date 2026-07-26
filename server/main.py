@@ -1,13 +1,15 @@
 from datetime import datetime
+import hashlib
 import itertools
 import json
 import os
+import shutil
 import sqlite3
 import threading
 import time
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, File, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 app = FastAPI()
 
@@ -27,6 +29,10 @@ else:
 IP_FILE = os.path.join(BASE_DIR, "used_ips.json")
 IP_HISTORY_FILE = os.path.join(BASE_DIR, "ip_change_history.json")
 DB_FILE = os.path.join(BASE_DIR, "devices.db")
+OTA_DIR = os.path.join(BASE_DIR, "ota")
+OTA_APK_PATH = os.path.join(OTA_DIR, "PhoneAgent.apk")
+OTA_META_PATH = os.path.join(OTA_DIR, "version.json")
+os.makedirs(OTA_DIR, exist_ok=True)
 
 COMMANDS = []  # kolejka oczekujących
 IN_FLIGHT = {}  # device_id -> komenda aktualnie u telefonu
@@ -340,12 +346,16 @@ def ensure_runtime_state(device_id: str, default_name: str = None):
             "every_proxy_address": "",
             "phone_number": "",
             "sms_count": 0,
+            "agent_version_code": 0,
+            "agent_version_name": "",
         }
     else:
         DEVICES_STATE[device_id]["name"] = name
         DEVICES_STATE[device_id]["group"] = group
         DEVICES_STATE[device_id].setdefault("phone_number", "")
         DEVICES_STATE[device_id].setdefault("sms_count", 0)
+        DEVICES_STATE[device_id].setdefault("agent_version_code", 0)
+        DEVICES_STATE[device_id].setdefault("agent_version_name", "")
 
     return DEVICES_STATE[device_id]
 
@@ -477,6 +487,8 @@ def get_phones():
                 "phone_number": sanitize_phone_number(meta.get("phone_number")) or "Brak numeru",
                 "phone_number_manual": bool(sanitize_phone_number(meta.get("phone_number"))),
                 "sms_count": state.get("sms_count") or len(SMS_STORE.get(dev_id, [])),
+                "agent_version_code": int(state.get("agent_version_code") or 0),
+                "agent_version_name": state.get("agent_version_name") or "",
                 "every_proxy_x": meta.get("every_proxy_x", 500),
                 "every_proxy_y": meta.get("every_proxy_y", 1000),
                 "tailscale_x": meta.get("tailscale_x", 500),
@@ -936,6 +948,149 @@ def check_ip(ip: str):
     return {"is_clean": True}
 
 
+def load_ota_meta():
+    if not os.path.exists(OTA_META_PATH):
+        return {
+            "available": False,
+            "version_code": 0,
+            "version_name": "",
+            "size": 0,
+            "sha256": "",
+            "uploaded_at": "",
+        }
+    try:
+        with open(OTA_META_PATH, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception:
+        meta = {}
+    has_apk = os.path.exists(OTA_APK_PATH) and os.path.getsize(OTA_APK_PATH) > 10000
+    meta["available"] = bool(has_apk and int(meta.get("version_code") or 0) > 0)
+    meta["apk_url"] = "/ota/apk"
+    if has_apk:
+        meta["size"] = os.path.getsize(OTA_APK_PATH)
+    return meta
+
+
+def save_ota_meta(meta: dict):
+    with open(OTA_META_PATH, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2)
+
+
+@app.get("/ota/version")
+def ota_version():
+    return load_ota_meta()
+
+
+@app.get("/ota/apk")
+def ota_apk():
+    if not os.path.exists(OTA_APK_PATH):
+        return JSONResponse({"status": "error", "message": "Brak APK na serwerze"}, status_code=404)
+    return FileResponse(
+        OTA_APK_PATH,
+        media_type="application/vnd.android.package-archive",
+        filename="PhoneAgent.apk",
+    )
+
+
+@app.post("/ota/upload")
+async def ota_upload(
+    file: UploadFile = File(...),
+    version_code: int = Query(0),
+    version_name: str = Query(""),
+):
+    """Wgrywa nowy APK na serwer (z panelu). Potem UPDATE_AGENT na telefonach."""
+    if not file.filename or not file.filename.lower().endswith(".apk"):
+        return JSONResponse({"status": "error", "message": "Wybierz plik .apk"}, status_code=400)
+
+    os.makedirs(OTA_DIR, exist_ok=True)
+    tmp_path = OTA_APK_PATH + ".tmp"
+    h = hashlib.sha256()
+    size = 0
+    with open(tmp_path, "wb") as out:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            out.write(chunk)
+            h.update(chunk)
+            size += len(chunk)
+
+    if size < 50000:
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+        return JSONResponse({"status": "error", "message": "Plik za mały / pusty"}, status_code=400)
+
+    shutil.move(tmp_path, OTA_APK_PATH)
+
+    # Jeśli nie podano version_code — bump względem poprzedniego
+    prev = load_ota_meta()
+    vc = int(version_code) if version_code and int(version_code) > 0 else int(prev.get("version_code") or 0) + 1
+    vn = (version_name or "").strip() or f"1.{vc}"
+    meta = {
+        "available": True,
+        "version_code": vc,
+        "version_name": vn,
+        "filename": "PhoneAgent.apk",
+        "size": size,
+        "sha256": h.hexdigest(),
+        "uploaded_at": datetime.now().strftime("%d.%m.%Y %H:%M"),
+        "apk_url": "/ota/apk",
+    }
+    save_ota_meta(meta)
+    print(f"✅ [OTA] Uploaded APK v{vc} ({vn}) size={size}")
+    return {"status": "ok", **meta}
+
+
+@app.post("/ota/push")
+async def ota_push(request: Request):
+    """Kolejkuje UPDATE_AGENT na jeden telefon albo na wszystkie online."""
+    data = await request.json()
+    force = bool(data.get("force", True))
+    device_id = data.get("device_id")
+    meta = load_ota_meta()
+    if not meta.get("available"):
+        return {"status": "error", "message": "Najpierw wgraj APK (sekcja OTA)"}
+
+    targets = []
+    if device_id:
+        targets = [device_id]
+    else:
+        now = time.time()
+        for did, st in DEVICES_STATE.items():
+            if (now - st.get("last_seen", 0)) < 40:
+                targets.append(did)
+
+    queued = []
+    with CMD_LOCK:
+        for did in targets:
+            # dedupe pending UPDATE_AGENT
+            COMMANDS[:] = [
+                c for c in COMMANDS
+                if not (c.get("device_id") == did and c.get("command") == "UPDATE_AGENT")
+            ]
+            cmd = {
+                "id": new_command_id(),
+                "device_id": did,
+                "command": "UPDATE_AGENT",
+                "payload": "FORCE" if force else "",
+                "executed": False,
+                "created_at": time.time(),
+                "wake_screen": device_wake_screen(did),
+            }
+            COMMANDS.append(cmd)
+            queued.append({"device_id": did, "id": cmd["id"]})
+
+    return {
+        "status": "ok",
+        "queued": len(queued),
+        "targets": queued,
+        "ota": meta,
+        **queue_snapshot(),
+    }
+
+
 @app.post("/{path:path}")
 @app.put("/{path:path}")
 async def catch_all_phone_app(path: str, request: Request):
@@ -963,6 +1118,8 @@ async def catch_all_phone_app(path: str, request: Request):
             "every_proxy_address",
             "online",
             "sms_count",
+            "agent_version_code",
+            "agent_version_name",
         ]:
             if key in data:
                 DEVICES_STATE[dev_id][key] = data[key]

@@ -174,6 +174,21 @@
         .queue-item.running { border-color: rgba(3,218,198,0.45); }
         .queue-item button { padding: 8px 12px; font-size: 0.72rem; background: rgba(239,68,68,0.25); border-color: rgba(239,68,68,0.45); }
         .queue-empty { opacity: 0.55; text-align: center; padding: 16px; }
+        .ota-bar {
+            max-width: 1300px; margin: 0 auto 8px; padding: 0 40px; position: relative; z-index: 20;
+        }
+        .ota-panel {
+            padding: 14px 18px; border-radius: 18px; background: rgba(0,0,0,0.45);
+            border: 1px solid rgba(3, 218, 198, 0.35); display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+        }
+        .ota-panel .ota-info { flex: 1; min-width: 200px; font-size: 0.8rem; }
+        .ota-panel .ota-info b { color: var(--cyan); }
+        .ota-panel input[type=file] { font-size: 0.72rem; max-width: 220px; }
+        .ota-panel input[type=number], .ota-panel input[type=text] {
+            width: 90px; padding: 8px; margin: 0; font-size: 0.75rem;
+        }
+        .ver-badge { font-size: 0.65rem; opacity: 0.7; margin-top: 2px; }
+        .ver-outdated { color: #fbbf24; opacity: 1; }
     </style>
 </head>
 <body>
@@ -183,6 +198,17 @@
 <div class="ticker-wrap"><div class="ticker">❤️ • NAPISZ COŚ MIŁEGO SWOJEJ DZIEWCZYNIE • ❤️ • NAPISZ COŚ MIŁEGO SWOJEJ DZIEWCZYNIE • ❤️</div></div>
 
 <header><h1>PHONE MONITOR PRO</h1></header>
+
+<div class="ota-bar">
+    <div class="ota-panel">
+        <div class="ota-info" id="otaInfo">OTA: ładowanie…</div>
+        <input type="number" id="otaVersionCode" placeholder="code" title="versionCode (np. 3)" min="1">
+        <input type="text" id="otaVersionName" placeholder="1.2" title="versionName">
+        <input type="file" id="otaFile" accept=".apk">
+        <button type="button" onclick="uploadOtaApk()">⬆️ Wgraj APK</button>
+        <button type="button" style="background: rgba(3,218,198,0.25); border-color: rgba(3,218,198,0.5);" onclick="pushOtaAll()">☁️ Update wszystkie</button>
+    </div>
+</div>
 
 <div class="queue-bar">
     <button class="queue-toggle" type="button" onclick="toggleQueuePanel()">
@@ -468,6 +494,7 @@
                         <button type="button" class="btn-save-num" style="padding:6px 10px;font-size:0.7rem;white-space:nowrap;">💾 Numer</button>
                     </div>
                     <div class="device-id copyable" data-copy="${safeId}" title="Kliknij, żeby skopiować ID">ID: ${safeId}</div>
+                    <div class="ver-badge agent-ver">APK: ---</div>
                     <div class="status-grid">
                         <span class="status-badge"></span>
                         <span class="status-badge"></span>
@@ -489,6 +516,7 @@
                         <button class="btn-action" onclick="send(this, '${safeId}','REBOOT')">🔄 Restart</button>
                         <button class="btn-settings" onclick="openSettings('${safeId}')">⚙️ Ustawienia</button>
                         <button class="btn-action" onclick="send(this, '${safeId}','CALIBRATE')">🎯 Kalibruj</button>
+                        <button class="btn-action" style="background: rgba(3,218,198,0.22);" onclick="pushOtaOne('${safeId}')">☁️ Update APK</button>
                         <button style="background: rgba(168, 85, 247, 0.25);" onclick="showHistory('${safeId}', '${safeName}')">📊 Historia</button>
                     </div>
                     <input id="cmd_${safeId}" placeholder="💻 Shell...">
@@ -506,6 +534,21 @@
             const locked = !!phone.phone_number_manual;
             setTextIfChanged(numEl, locked ? `📞 ${numRaw} 🔒` : `📞 ${numRaw}`);
             if (numEl) numEl.setAttribute('data-copy', numRaw === 'Brak numeru' ? '' : numRaw);
+
+            const verEl = card.querySelector('.agent-ver');
+            if (verEl) {
+                const vc = phone.agent_version_code || 0;
+                const vn = phone.agent_version_name || '?';
+                const remote = window._otaMeta && window._otaMeta.version_code ? Number(window._otaMeta.version_code) : 0;
+                let txt = vc ? `APK: v${vc} (${vn})` : 'APK: nieznana (stary agent?)';
+                if (remote && vc && vc < remote) {
+                    txt += ` → serwer v${remote}`;
+                    verEl.classList.add('ver-outdated');
+                } else {
+                    verEl.classList.remove('ver-outdated');
+                }
+                setTextIfChanged(verEl, txt);
+            }
 
             const quickIn = card.querySelector('.quick-num-input');
             const saveNumBtn = card.querySelector('.btn-save-num');
@@ -823,7 +866,102 @@
     }
     
     function closeModal(id) { document.getElementById(id).style.display = "none"; }
+
+    window._otaMeta = null;
+
+    async function refreshOtaInfo() {
+        const el = document.getElementById('otaInfo');
+        try {
+            const res = await fetch('/ota/version');
+            const m = await res.json();
+            window._otaMeta = m;
+            if (!m.available) {
+                el.innerHTML = 'OTA: <b>brak APK</b> — zbuduj PhoneAgent, wgraj .apk, potem „Update wszystkie”.';
+                return;
+            }
+            const mb = m.size ? (m.size / 1048576).toFixed(1) + ' MB' : '';
+            el.innerHTML = `OTA na serwerze: <b>v${m.version_code}</b> (${escapeHtml(m.version_name || '')}) ${mb} · ${escapeHtml(m.uploaded_at || '')}`;
+            if (!document.getElementById('otaVersionCode').value) {
+                document.getElementById('otaVersionCode').value = Number(m.version_code || 0) + 1;
+            }
+        } catch (e) {
+            el.textContent = 'OTA: błąd odczytu';
+        }
+    }
+
+    async function uploadOtaApk() {
+        const fileInput = document.getElementById('otaFile');
+        const file = fileInput.files && fileInput.files[0];
+        if (!file) {
+            alert('Wybierz plik .apk');
+            return;
+        }
+        const vc = Number(document.getElementById('otaVersionCode').value || 0);
+        const vn = document.getElementById('otaVersionName').value.trim();
+        const fd = new FormData();
+        fd.append('file', file);
+        const qs = new URLSearchParams();
+        if (vc > 0) qs.set('version_code', String(vc));
+        if (vn) qs.set('version_name', vn);
+        try {
+            showCopyToast('Wgrywam APK…');
+            const res = await fetch('/ota/upload?' + qs.toString(), { method: 'POST', body: fd });
+            const data = await res.json();
+            if (!res.ok || data.status === 'error') {
+                alert(data.message || 'Błąd uploadu');
+                return;
+            }
+            showCopyToast('APK v' + data.version_code + ' wgrany');
+            fileInput.value = '';
+            await refreshOtaInfo();
+        } catch (e) {
+            console.error(e);
+            alert('Błąd uploadu APK');
+        }
+    }
+
+    async function pushOtaAll() {
+        if (!confirm('Wysłać UPDATE_AGENT do wszystkich online telefonów?')) return;
+        try {
+            const res = await fetch('/ota/push', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ force: true })
+            });
+            const data = await res.json();
+            if (data.status === 'error') {
+                alert(data.message || 'Błąd');
+                return;
+            }
+            showCopyToast('OTA: kolejka ' + (data.queued || 0) + ' tel.');
+            await loadQueue();
+        } catch (e) {
+            console.error(e);
+            alert('Błąd push OTA');
+        }
+    }
+
+    async function pushOtaOne(deviceId) {
+        try {
+            const res = await fetch('/ota/push', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ device_id: deviceId, force: true })
+            });
+            const data = await res.json();
+            if (data.status === 'error') {
+                alert(data.message || 'Błąd');
+                return;
+            }
+            showCopyToast('Update APK → ' + deviceId.slice(0, 8));
+            await loadQueue();
+        } catch (e) {
+            console.error(e);
+        }
+    }
     
+    refreshOtaInfo();
+    setInterval(refreshOtaInfo, 15000);
     loadPhones();
     setInterval(loadPhones, 1000);
 </script>

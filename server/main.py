@@ -131,18 +131,26 @@ def init_db():
 
 
 def sanitize_phone_number(value) -> str:
-    """Odrzuca atrapy typu 00000000 z SIM; zostawia realny / ręczny numer."""
+    """Odrzuca atrapy (0000…), ICCID (89…) i IMSI — zostawia MSISDN."""
     if value is None:
         return ""
     raw = str(value).strip()
     if not raw or raw.lower() in ("brak numeru", "none", "null"):
         return ""
     digits = "".join(ch for ch in raw if ch.isdigit())
-    if len(digits) < 9:
+    if len(digits) < 9 or len(digits) > 15:
         return ""
     if digits and set(digits) == {"0"}:
         return ""
     if len(set(digits)) == 1:
+        return ""
+    # ICCID / serial SIM
+    if digits.startswith("89") and len(digits) >= 15:
+        return ""
+    # IMSI (np. PL 260…)
+    if len(digits) == 15 and (digits.startswith("260") or digits.startswith("89")):
+        return ""
+    if not raw.startswith("+") and len(digits) >= 14:
         return ""
     return raw
 

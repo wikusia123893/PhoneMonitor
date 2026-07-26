@@ -449,8 +449,13 @@
                 ipEl.style.color = "var(--cyan)";
                 tsIpEl.innerText = phone.tailscale_ip || "Wyłączone";
                 tsIpEl.style.color = "var(--cyan)";
-                proxyValEl.innerText = phone.every_proxy_address || "Wyłączone";
-                proxyValEl.style.color = "var(--cyan)";
+                if (phone.every_proxy) {
+                    proxyValEl.innerText = phone.every_proxy_address || "ON";
+                    proxyValEl.style.color = "var(--cyan)";
+                } else {
+                    proxyValEl.innerText = "Wyłączone";
+                    proxyValEl.style.color = "#ef4444";
+                }
                 smsCountEl.innerText = String(phone.sms_count ?? 0);
                 actionBtns.forEach(b => b.disabled = false);
             }
@@ -584,11 +589,12 @@
             if (data.ip_history && data.ip_history.length > 0) {
                 let html = "";
                 data.ip_history.forEach(item => {
-                    html += `<div class="history-item"><span class="history-ip">${item.ip}</span><span class="history-date">${item.date}</span></div>`;
+                    const old = item.old_ip ? `<span style="opacity:0.45;text-decoration:line-through;margin-right:8px;">${escapeHtml(item.old_ip)}</span>` : '';
+                    html += `<div class="history-item"><span class="history-ip">${old}${escapeHtml(item.ip)}</span><span class="history-date">${escapeHtml(item.date || '')}</span></div>`;
                 });
                 contentEl.innerHTML = html;
             } else {
-                contentEl.innerHTML = "<div style='text-align:center; opacity:0.6; padding: 20px;'>Brak zarejestrowanych zmian IP.</div>";
+                contentEl.innerHTML = "<div style='text-align:center; opacity:0.6; padding: 20px;'>Brak zarejestrowanych zmian IP dla tego telefonu.</div>";
             }
         } catch(e) {
             contentEl.innerHTML = "Błąd pobierania historii.";

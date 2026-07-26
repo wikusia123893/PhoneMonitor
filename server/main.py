@@ -362,6 +362,57 @@ def save_ip_history(history):
         json.dump(history, f, indent=4)
 
 
+def is_ipv4(value) -> bool:
+    if not value or not isinstance(value, str):
+        return False
+    parts = value.strip().split(".")
+    if len(parts) != 4:
+        return False
+    try:
+        return all(0 <= int(p) <= 255 for p in parts)
+    except ValueError:
+        return False
+
+
+def record_ip_change(device_id: str, new_ip: str, force: bool = False) -> bool:
+    """Zapisuje zmianę publicznego IP do historii (per telefon) i aktualizuje panel."""
+    if not device_id or not is_ipv4(new_ip):
+        return False
+
+    ensure_runtime_state(device_id)
+    old_ip = DEVICES_STATE[device_id].get("ip") or ""
+    if not force and old_ip == new_ip:
+        return False
+
+    DEVICES_STATE[device_id]["ip"] = new_ip
+
+    ip_db = load_ip_db()
+    now = time.time()
+    seven_days = 7 * 24 * 60 * 60
+    ip_db = {ip: ts for ip, ts in ip_db.items() if (now - ts) < seven_days}
+    ip_db[new_ip] = now
+    save_ip_db(ip_db)
+
+    history = load_ip_history()
+    # nie duplikuj tego samego IP dla tego telefonu z rzędu
+    if history and history[0].get("device_id") == device_id and history[0].get("ip") == new_ip:
+        return True
+
+    formatted_date = datetime.now().strftime("%d.%m.%Y %H:%M")
+    history.insert(
+        0,
+        {
+            "date": formatted_date,
+            "ip": new_ip,
+            "device_id": device_id,
+            "old_ip": old_ip if is_ipv4(old_ip) else "",
+        },
+    )
+    save_ip_history(history[:200])
+    print(f"✅ [IP HISTORY] {device_id}: {old_ip} -> {new_ip}")
+    return True
+
+
 # ==========================================
 # ENDPOINTY SERWERA FASTAPI
 # ==========================================
@@ -419,9 +470,16 @@ def get_phones():
 @app.get("/phones/{device_id}/history")
 def get_history(device_id: str):
     history = load_ip_history()
+    # Tylko wpisy tego telefonu (+ stare wpisy bez device_id na końcu, jeśli w ogóle)
+    own = [h for h in history if h.get("device_id") == device_id]
     return {
-        "ip_history": history,
-        "proxy": [{"old_ip": "-", "new_ip": DEVICES_STATE.get(device_id, {}).get("ip", "-")}],
+        "ip_history": own,
+        "proxy": [
+            {
+                "old_ip": "-",
+                "new_ip": DEVICES_STATE.get(device_id, {}).get("ip", "-"),
+            }
+        ],
         "tailscale": [],
     }
 
@@ -794,47 +852,38 @@ def get_next_command(device_id: str):
 async def command_done(request: Request):
     data = await request.json()
     command_id = data.get("command_id")
-    status = data.get("result") or data.get("status")
-    message = data.get("message") or data.get("result")
+    # WAŻNE: status = pole "status" (SUCCESS/FAILED), nie "result" (tam jest IP / treść)
+    status = str(data.get("status") or "").upper()
+    message = data.get("message") or data.get("result") or ""
     device_id = data.get("device_id")
 
     clear_in_flight(command_id=command_id, device_id=device_id)
-    print(f">>> [SERWER] Wykonano komendę ID: {command_id}, wynik: {status}, IP: {message}")
+    print(f">>> [SERWER] Wykonano komendę ID: {command_id}, wynik: {status}, msg: {message}")
 
-    if status == "SUCCESS" and message:
+    if status == "SUCCESS" and message and device_id:
         new_ip = str(message).strip()
-        if "." in new_ip and len(new_ip.split(".")) == 4:
+        if is_ipv4(new_ip):
             ip_db = load_ip_db()
             now = time.time()
             seven_days = 7 * 24 * 60 * 60
-
             ip_db = {ip: ts for ip, ts in ip_db.items() if (now - ts) < seven_days}
 
-            if new_ip in ip_db:
-                print(f"⚠️ [IP MANAGER] Adres {new_ip} był używany w ciągu ostatnich 7 dni! Ponawiam zmianę...")
-                if device_id:
-                    retry_cmd = {
-                        "id": new_command_id(),
-                        "device_id": device_id,
-                        "command": "CHANGE_IP",
-                        "payload": "",
-                        "executed": False,
-                        "created_at": time.time(),
-                    }
-                    with CMD_LOCK:
-                        COMMANDS.append(retry_cmd)
+            # IP już w bazie (używane <7 dni) i to nie jest bieżące IP tego telefonu → retry
+            current = (DEVICES_STATE.get(device_id) or {}).get("ip")
+            if new_ip in ip_db and new_ip != current:
+                print(f"⚠️ [IP MANAGER] Adres {new_ip} był używany w ciągu 7 dni — ponawiam CHANGE_IP")
+                retry_cmd = {
+                    "id": new_command_id(),
+                    "device_id": device_id,
+                    "command": "CHANGE_IP",
+                    "payload": "",
+                    "executed": False,
+                    "created_at": time.time(),
+                }
+                with CMD_LOCK:
+                    COMMANDS.append(retry_cmd)
             else:
-                print(f"✅ [IP MANAGER] Nowe unikalne IP: {new_ip}. Zapisuję do historii.")
-                ip_db[new_ip] = now
-                save_ip_db(ip_db)
-
-                history = load_ip_history()
-                formatted_date = datetime.now().strftime("%d.%m.%Y %H:%M")
-                history.insert(0, {"date": formatted_date, "ip": new_ip, "device_id": device_id})
-                save_ip_history(history[:50])
-
-                if device_id and device_id in DEVICES_STATE:
-                    DEVICES_STATE[device_id]["ip"] = new_ip
+                record_ip_change(device_id, new_ip, force=True)
 
     return {"status": "ok", **queue_snapshot()}
 
@@ -871,7 +920,6 @@ async def catch_all_phone_app(path: str, request: Request):
         for key in [
             "battery",
             "battery_temp",
-            "ip",
             "tailscale",
             "tailscale_ip",
             "every_proxy",
@@ -881,6 +929,20 @@ async def catch_all_phone_app(path: str, request: Request):
         ]:
             if key in data:
                 DEVICES_STATE[dev_id][key] = data[key]
+
+        # Publiczne IP — aktualizuj panel + historię przy realnej zmianie
+        if "ip" in data and is_ipv4(str(data.get("ip") or "")):
+            new_ip = str(data["ip"]).strip()
+            old_ip = DEVICES_STATE[dev_id].get("ip") or ""
+            if old_ip != new_ip:
+                record_ip_change(dev_id, new_ip, force=True)
+            else:
+                DEVICES_STATE[dev_id]["ip"] = new_ip
+        elif "ip" in data:
+            # nie nadpisuj dobrego IP śmieciem typu "Ładowanie..."
+            candidate = str(data.get("ip") or "").strip()
+            if candidate and candidate not in ("Ładowanie...", "Loading...", "-"):
+                DEVICES_STATE[dev_id]["ip"] = candidate
 
         meta = db_get_device(dev_id) or {}
         override = sanitize_phone_number(meta.get("phone_number"))

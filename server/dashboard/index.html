@@ -70,6 +70,18 @@
         .phone-title { display: flex; flex-direction: column; gap: 2px; }
         .device-id { font-size: 0.62rem; opacity: 0.4; word-break: break-all; margin-bottom: 8px; }
         .phone-number { font-size: 0.82rem; color: var(--cyan); font-weight: 600; margin-bottom: 8px; }
+        .copyable {
+            user-select: text; -webkit-user-select: text;
+            cursor: copy; border-radius: 6px; transition: background 0.15s;
+        }
+        .copyable:hover { background: rgba(3, 218, 198, 0.12); }
+        .copy-toast {
+            position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(20px);
+            background: rgba(3, 218, 198, 0.95); color: #041016; font-weight: 700; font-size: 0.85rem;
+            padding: 10px 18px; border-radius: 999px; z-index: 9999; opacity: 0; pointer-events: none;
+            transition: opacity 0.2s, transform 0.2s;
+        }
+        .copy-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
         
         .status-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
         .status-badge { 
@@ -253,6 +265,8 @@
     </div>
 </div>
 
+<div id="copyToast" class="copy-toast">Skopiowano</div>
+
 <script>
     let phonesCache = [];
     let currentSettingsDeviceId = null;
@@ -260,6 +274,7 @@
     let queueOpen = false;
     let queueCache = { pending: [], running: [], count: 0 };
     const sendLocks = new Set(); // device_id:command — anty-spam kliknięć
+    let pauseRefreshUntil = 0; // nie kasuj zaznaczenia podczas kopiowania
 
     function escapeHtml(str) {
         return String(str ?? '')
@@ -269,6 +284,68 @@
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#39;');
     }
+
+    function hasTextSelection() {
+        const sel = window.getSelection();
+        return !!(sel && sel.toString().trim().length > 0);
+    }
+
+    function setTextIfChanged(el, text) {
+        if (!el) return;
+        const next = String(text ?? '');
+        if (el.textContent !== next) el.textContent = next;
+    }
+
+    function showCopyToast(msg) {
+        const t = document.getElementById('copyToast');
+        if (!t) return;
+        t.textContent = msg || 'Skopiowano';
+        t.classList.add('show');
+        clearTimeout(showCopyToast._timer);
+        showCopyToast._timer = setTimeout(() => t.classList.remove('show'), 1200);
+    }
+
+    async function copyText(text) {
+        const value = String(text ?? '').trim();
+        if (!value) return;
+        pauseRefreshUntil = Date.now() + 4000;
+        try {
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(value);
+            } else {
+                const ta = document.createElement('textarea');
+                ta.value = value;
+                ta.style.position = 'fixed';
+                ta.style.left = '-9999px';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                ta.remove();
+            }
+            showCopyToast('Skopiowano: ' + (value.length > 28 ? value.slice(0, 28) + '…' : value));
+        } catch (e) {
+            console.error(e);
+            showCopyToast('Nie udało się skopiować');
+        }
+    }
+
+    document.addEventListener('selectionchange', () => {
+        if (hasTextSelection()) pauseRefreshUntil = Date.now() + 5000;
+    });
+    document.addEventListener('mousedown', (e) => {
+        if (e.target && e.target.closest && e.target.closest('.copyable, .sms-body, input, textarea')) {
+            pauseRefreshUntil = Date.now() + 5000;
+        }
+    });
+    document.addEventListener('click', (e) => {
+        const el = e.target && e.target.closest ? e.target.closest('[data-copy]') : null;
+        if (!el) return;
+        // jeśli user zaznaczał dłuższy tekst — nie nadpisuj kopiowania jednym kliknięciem
+        if (hasTextSelection() && window.getSelection().toString().trim().length > 2) return;
+        let val = el.getAttribute('data-copy') || '';
+        try { val = decodeURIComponent(val); } catch (_) {}
+        if (val) copyText(val);
+    });
 
     function toggleQueuePanel() {
         queueOpen = !queueOpen;
@@ -370,8 +447,8 @@
                             <span class="phone-name">📱 ${safeName}</span>
                         </span>
                     </h2>
-                    <div class="phone-number phone-num-val">📞 ---</div>
-                    <div class="device-id">ID: ${safeId}</div>
+                    <div class="phone-number phone-num-val copyable" data-copy="" title="Kliknij lub zaznacz, żeby skopiować">📞 ---</div>
+                    <div class="device-id copyable" data-copy="${safeId}" title="Kliknij, żeby skopiować ID">ID: ${safeId}</div>
                     <div class="status-grid">
                         <span class="status-badge"></span>
                         <span class="status-badge"></span>
@@ -380,9 +457,9 @@
                     <div class="info-box">
                         <div>🔋 Bateria: <b class="battery-val"></b></div>
                         <div>🌡️ Temp: <b class="temp-val"></b></div>
-                        <div>📶 IP SIM: <b class="ip-val"></b></div>
-                        <div>🔒 Tailscale: <b class="ts-ip-val" style="color: var(--cyan);"></b></div>
-                        <div>🛡️ Proxy: <b class="proxy-val" style="color: var(--cyan);"></b></div>
+                        <div>📶 IP SIM: <b class="ip-val copyable" data-copy="" title="Kliknij, żeby skopiować"></b></div>
+                        <div>🔒 Tailscale: <b class="ts-ip-val copyable" data-copy="" style="color: var(--cyan);" title="Kliknij, żeby skopiować"></b></div>
+                        <div>🛡️ Proxy: <b class="proxy-val copyable" data-copy="" style="color: var(--cyan);" title="Kliknij, żeby skopiować"></b></div>
                         <div>💬 SMS: <b class="sms-count-val"></b></div>
                     </div>
                     <div class="btn-grid">
@@ -402,20 +479,32 @@
                 container.appendChild(card);
             }
 
-            card.querySelector('.phone-name').innerHTML = `📱 ${safeName}`;
-            card.querySelector('.phone-num-val').textContent = `📞 ${phone.phone_number || 'Brak numeru'}`;
+            const nameEl = card.querySelector('.phone-name');
+            const nameText = `📱 ${safeName}`;
+            if (nameEl && nameEl.textContent !== nameText) nameEl.textContent = nameText;
+
+            const numRaw = phone.phone_number || 'Brak numeru';
+            const numEl = card.querySelector('.phone-num-val');
+            setTextIfChanged(numEl, `📞 ${numRaw}`);
+            if (numEl) numEl.setAttribute('data-copy', numRaw === 'Brak numeru' ? '' : numRaw);
 
             const badgeAgent = card.querySelector('.status-grid span:nth-child(1)');
-            badgeAgent.className = `status-badge ${phone.online ? 'on' : 'off'}`;
-            badgeAgent.innerText = `Agent ${phone.online ? 'ON' : 'OFF'}`;
+            const agentTxt = `Agent ${phone.online ? 'ON' : 'OFF'}`;
+            const agentCls = `status-badge ${phone.online ? 'on' : 'off'}`;
+            if (badgeAgent.className !== agentCls) badgeAgent.className = agentCls;
+            setTextIfChanged(badgeAgent, agentTxt);
             
             const badgeTs = card.querySelector('.status-grid span:nth-child(2)');
-            badgeTs.className = `status-badge ${phone.tailscale ? 'on' : 'off'}`;
-            badgeTs.innerText = `TS ${phone.tailscale ? 'ON' : 'OFF'}`;
+            const tsTxt = `TS ${phone.tailscale ? 'ON' : 'OFF'}`;
+            const tsCls = `status-badge ${phone.tailscale ? 'on' : 'off'}`;
+            if (badgeTs.className !== tsCls) badgeTs.className = tsCls;
+            setTextIfChanged(badgeTs, tsTxt);
 
             const badgePx = card.querySelector('.status-grid span:nth-child(3)');
-            badgePx.className = `status-badge ${phone.every_proxy ? 'on' : 'off'}`;
-            badgePx.innerText = `PX ${phone.every_proxy ? 'ON' : 'OFF'}`;
+            const pxTxt = `PX ${phone.every_proxy ? 'ON' : 'OFF'}`;
+            const pxCls = `status-badge ${phone.every_proxy ? 'on' : 'off'}`;
+            if (badgePx.className !== pxCls) badgePx.className = pxCls;
+            setTextIfChanged(badgePx, pxTxt);
 
             const batteryEl = card.querySelector('.battery-val');
             const tempEl = card.querySelector('.temp-val');
@@ -426,38 +515,48 @@
             const actionBtns = card.querySelectorAll('.btn-action');
 
             if (!phone.online) {
-                card.style.opacity = "0.5";
-                card.style.borderColor = "#ef4444";
-                batteryEl.innerText = "OFFLINE";
+                if (card.style.opacity !== "0.5") card.style.opacity = "0.5";
+                if (card.style.borderColor !== "rgb(239, 68, 68)") card.style.borderColor = "#ef4444";
+                setTextIfChanged(batteryEl, "OFFLINE");
                 batteryEl.style.color = "#ef4444";
-                tempEl.innerText = "---";
-                ipEl.innerText = "Brak połączenia";
+                setTextIfChanged(tempEl, "---");
+                setTextIfChanged(ipEl, "Brak połączenia");
                 ipEl.style.color = "#ef4444";
-                tsIpEl.innerText = "---";
+                ipEl.setAttribute('data-copy', '');
+                setTextIfChanged(tsIpEl, "---");
                 tsIpEl.style.color = "#ef4444";
-                proxyValEl.innerText = "---";
+                tsIpEl.setAttribute('data-copy', '');
+                setTextIfChanged(proxyValEl, "---");
                 proxyValEl.style.color = "#ef4444";
-                smsCountEl.innerText = "---";
-                actionBtns.forEach(b => b.disabled = true);
+                proxyValEl.setAttribute('data-copy', '');
+                setTextIfChanged(smsCountEl, "---");
+                actionBtns.forEach(b => { if (!b.disabled) b.disabled = true; });
             } else {
-                card.style.opacity = "1";
+                if (card.style.opacity !== "1") card.style.opacity = "1";
                 card.style.borderColor = "rgba(255, 255, 255, 0.15)";
-                batteryEl.innerText = `${phone.battery || 0}%`;
+                setTextIfChanged(batteryEl, `${phone.battery || 0}%`);
                 batteryEl.style.color = (phone.battery < 20) ? '#ef4444' : '#4ade80';
-                tempEl.innerText = phone.battery_temp ? phone.battery_temp + '°C' : '---';
-                ipEl.innerText = phone.ip || "-";
+                setTextIfChanged(tempEl, phone.battery_temp ? phone.battery_temp + '°C' : '---');
+                const ipVal = phone.ip || "-";
+                setTextIfChanged(ipEl, ipVal);
                 ipEl.style.color = "var(--cyan)";
-                tsIpEl.innerText = phone.tailscale_ip || "Wyłączone";
+                ipEl.setAttribute('data-copy', ipVal === '-' ? '' : ipVal);
+                const tsVal = phone.tailscale_ip || "Wyłączone";
+                setTextIfChanged(tsIpEl, tsVal);
                 tsIpEl.style.color = "var(--cyan)";
+                tsIpEl.setAttribute('data-copy', phone.tailscale_ip || '');
                 if (phone.every_proxy) {
-                    proxyValEl.innerText = phone.every_proxy_address || "ON";
+                    const pxAddr = phone.every_proxy_address || "ON";
+                    setTextIfChanged(proxyValEl, pxAddr);
                     proxyValEl.style.color = "var(--cyan)";
+                    proxyValEl.setAttribute('data-copy', phone.every_proxy_address || '');
                 } else {
-                    proxyValEl.innerText = "Wyłączone";
+                    setTextIfChanged(proxyValEl, "Wyłączone");
                     proxyValEl.style.color = "#ef4444";
+                    proxyValEl.setAttribute('data-copy', '');
                 }
-                smsCountEl.innerText = String(phone.sms_count ?? 0);
-                actionBtns.forEach(b => b.disabled = false);
+                setTextIfChanged(smsCountEl, String(phone.sms_count ?? 0));
+                actionBtns.forEach(b => { if (b.disabled) b.disabled = false; });
             }
         }
     }
@@ -483,11 +582,14 @@
             }
             el.innerHTML = msgs.map(m => {
                 const when = m.date ? new Date(Number(m.date)).toLocaleString('pl-PL') : '';
+                const body = m.body || '';
+                const addr = m.address || '';
                 return `<div class="sms-item">
-                    <div><span class="sms-from">${escapeHtml(m.address || '?')}</span>
+                    <div><span class="sms-from copyable" data-copy="${encodeURIComponent(addr)}" title="Kopiuj nadawcę">${escapeHtml(addr || '?')}</span>
                     <span class="sms-date">${escapeHtml(when)}</span></div>
-                    <div class="sms-body">${escapeHtml(m.body || '')}</div>
+                    <div class="sms-body copyable" data-copy="${encodeURIComponent(body)}" title="Kliknij, żeby skopiować SMS">${escapeHtml(body)}</div>
                     <div class="sms-actions">
+                        <button type="button" onclick='copyText(${JSON.stringify(body)})'>📋 Kopiuj</button>
                         <button type="button" onclick="deleteSms('${escapeHtml(m.id)}')">🗑️ Usuń</button>
                     </div>
                 </div>`;
@@ -518,6 +620,12 @@
 
     async function loadPhones() {
         try {
+            // Nie odświeżaj DOM gdy user zaznacza / kopiuje tekst — inaczej zaznaczenie znika
+            if (Date.now() < pauseRefreshUntil || hasTextSelection()) {
+                const response = await fetch("/phones/");
+                phonesCache = await response.json();
+                return;
+            }
             let response = await fetch("/phones/");
             phonesCache = await response.json();
             renderPhones();
@@ -590,7 +698,7 @@
                 let html = "";
                 data.ip_history.forEach(item => {
                     const old = item.old_ip ? `<span style="opacity:0.45;text-decoration:line-through;margin-right:8px;">${escapeHtml(item.old_ip)}</span>` : '';
-                    html += `<div class="history-item"><span class="history-ip">${old}${escapeHtml(item.ip)}</span><span class="history-date">${escapeHtml(item.date || '')}</span></div>`;
+                    html += `<div class="history-item"><span class="history-ip copyable" data-copy="${escapeHtml(item.ip)}" title="Kopiuj IP">${old}${escapeHtml(item.ip)}</span><span class="history-date">${escapeHtml(item.date || '')}</span></div>`;
                 });
                 contentEl.innerHTML = html;
             } else {

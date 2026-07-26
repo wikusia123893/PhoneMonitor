@@ -120,6 +120,7 @@ def init_db():
     for col, typ in [
         ("proxy_calibrated", "INTEGER DEFAULT 0"),
         ("tailscale_calibrated", "INTEGER DEFAULT 0"),
+        ("phone_number", "TEXT DEFAULT ''"),
     ]:
         try:
             cursor.execute(f"ALTER TABLE devices ADD COLUMN {col} {typ}")
@@ -127,6 +128,23 @@ def init_db():
             pass
     conn.commit()
     conn.close()
+
+
+def sanitize_phone_number(value) -> str:
+    """Odrzuca atrapy typu 00000000 z SIM; zostawia realny / ręczny numer."""
+    if value is None:
+        return ""
+    raw = str(value).strip()
+    if not raw or raw.lower() in ("brak numeru", "none", "null"):
+        return ""
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    if len(digits) < 9:
+        return ""
+    if digits and set(digits) == {"0"}:
+        return ""
+    if len(set(digits)) == 1:
+        return ""
+    return raw
 
 
 def db_register_device(device_id: str, default_name: str = "Nowy Telefon", group_name: str = "Domyślna"):
@@ -148,7 +166,8 @@ def db_get_device(device_id: str):
     cursor = conn.cursor()
     cursor.execute('''
         SELECT custom_name, group_name, every_proxy_x, every_proxy_y, tailscale_x, tailscale_y,
-               COALESCE(proxy_calibrated, 0), COALESCE(tailscale_calibrated, 0)
+               COALESCE(proxy_calibrated, 0), COALESCE(tailscale_calibrated, 0),
+               COALESCE(phone_number, '')
         FROM devices WHERE device_id = ?
     ''', (device_id,))
     row = cursor.fetchone()
@@ -164,6 +183,7 @@ def db_get_device(device_id: str):
         "tailscale_y": row[5],
         "proxy_calibrated": bool(row[6]),
         "tailscale_calibrated": bool(row[7]),
+        "phone_number": row[8] or "",
     }
 
 
@@ -185,8 +205,13 @@ def db_get_coords(device_id: str):
     }
 
 
-def db_update_meta(device_id: str, custom_name: str = None, group_name: str = None):
-    """Aktualizuje nazwę i/lub grupę urządzenia."""
+def db_update_meta(
+    device_id: str,
+    custom_name: str = None,
+    group_name: str = None,
+    phone_number: str = None,
+):
+    """Aktualizuje nazwę, grupę i/lub ręczny numer telefonu."""
     db_register_device(device_id)
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
@@ -199,6 +224,12 @@ def db_update_meta(device_id: str, custom_name: str = None, group_name: str = No
         cursor.execute(
             "UPDATE devices SET group_name = ? WHERE device_id = ?",
             (group_name.strip() or "Domyślna", device_id),
+        )
+    if phone_number is not None:
+        # puste = wyczyść; atrapy 0000 nie zapisujemy
+        cursor.execute(
+            "UPDATE devices SET phone_number = ? WHERE device_id = ?",
+            (sanitize_phone_number(phone_number), device_id),
         )
     conn.commit()
     conn.close()
@@ -358,7 +389,11 @@ def get_phones():
                 "ip": state.get("ip", "0.0.0.0"),
                 "tailscale_ip": state.get("tailscale_ip", ""),
                 "every_proxy_address": state.get("every_proxy_address", ""),
-                "phone_number": state.get("phone_number") or "Brak numeru",
+                "phone_number": (
+                    sanitize_phone_number(meta.get("phone_number"))
+                    or sanitize_phone_number(state.get("phone_number"))
+                    or "Brak numeru"
+                ),
                 "sms_count": state.get("sms_count") or len(SMS_STORE.get(dev_id, [])),
                 "every_proxy_x": meta.get("every_proxy_x", 500),
                 "every_proxy_y": meta.get("every_proxy_y", 1000),
@@ -388,7 +423,7 @@ async def sync_sms(device_id: str, request: Request):
     data = await request.json()
     ensure_runtime_state(device_id)
     messages = data.get("messages") or []
-    phone_number = data.get("phone_number") or ""
+    phone_number = sanitize_phone_number(data.get("phone_number") or "")
     normalized = []
     for m in messages:
         normalized.append(
@@ -403,8 +438,14 @@ async def sync_sms(device_id: str, request: Request):
     SMS_STORE[device_id] = normalized
     DEVICES_STATE[device_id]["sms_count"] = len(normalized)
     DEVICES_STATE[device_id]["last_seen"] = time.time()
-    if phone_number:
+    meta = db_get_device(device_id) or {}
+    override = sanitize_phone_number(meta.get("phone_number"))
+    if override:
+        DEVICES_STATE[device_id]["phone_number"] = override
+    elif phone_number:
         DEVICES_STATE[device_id]["phone_number"] = phone_number
+    elif not sanitize_phone_number(DEVICES_STATE[device_id].get("phone_number")):
+        DEVICES_STATE[device_id]["phone_number"] = ""
     return {"status": "ok", "count": len(normalized)}
 
 
@@ -533,18 +574,24 @@ async def set_device_coords(device_id: str, request: Request):
 
 @app.post("/devices/{device_id}/settings")
 async def set_device_settings(device_id: str, request: Request):
-    """Jednym requestem zapisuje nazwę, grupę i współrzędne."""
+    """Jednym requestem zapisuje nazwę, grupę, numer i współrzędne."""
     data = await request.json()
 
     custom_name = data.get("custom_name")
     group_name = data.get("group_name")
+    phone_number = data.get("phone_number")
     px_x = int(data.get("every_proxy_x", 500))
     px_y = int(data.get("every_proxy_y", 1000))
     ts_x = int(data.get("tailscale_x", 500))
     ts_y = int(data.get("tailscale_y", 1000))
 
     db_register_device(device_id)
-    db_update_meta(device_id, custom_name=custom_name, group_name=group_name)
+    db_update_meta(
+        device_id,
+        custom_name=custom_name,
+        group_name=group_name,
+        phone_number=phone_number if phone_number is not None else None,
+    )
     db_update_coords(
         device_id,
         every_proxy_x=px_x,
@@ -560,12 +607,15 @@ async def set_device_settings(device_id: str, request: Request):
         state["name"] = custom_name.strip() or state["name"]
     if group_name is not None:
         state["group"] = group_name.strip() or "Domyślna"
+    if phone_number is not None:
+        state["phone_number"] = sanitize_phone_number(phone_number)
 
     return {
         "status": "ok",
         "device_id": device_id,
         "name": state["name"],
         "group": state["group"],
+        "phone_number": state.get("phone_number") or "",
         "every_proxy_x": px_x,
         "every_proxy_y": px_y,
         "tailscale_x": ts_x,
@@ -819,11 +869,18 @@ async def catch_all_phone_app(path: str, request: Request):
             "every_proxy",
             "every_proxy_address",
             "online",
-            "phone_number",
             "sms_count",
         ]:
             if key in data:
                 DEVICES_STATE[dev_id][key] = data[key]
+
+        meta = db_get_device(dev_id) or {}
+        override = sanitize_phone_number(meta.get("phone_number"))
+        if override:
+            DEVICES_STATE[dev_id]["phone_number"] = override
+        elif "phone_number" in data:
+            cleaned = sanitize_phone_number(data.get("phone_number"))
+            DEVICES_STATE[dev_id]["phone_number"] = cleaned
 
         return {"status": "ok", "success": True}
     except Exception:

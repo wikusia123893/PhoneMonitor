@@ -220,6 +220,11 @@
             <input id="setName" placeholder="np. Xiaomi Salon">
         </div>
 
+        <div class="form-field full">
+            <label>Numer telefonu (SIM)</label>
+            <input id="setPhoneNumber" placeholder="np. +48500123456 — jeśli SIM nie podaje, wpisz ręcznie">
+        </div>
+
         <div class="form-grid">
             <div class="form-field">
                 <label>Every Proxy X</label>
@@ -595,6 +600,9 @@
         currentSettingsDeviceId = deviceId;
         document.getElementById('settingsDeviceId').textContent = `ID: ${deviceId}`;
         document.getElementById('setName').value = phone.name || '';
+        const num = phone.phone_number || '';
+        document.getElementById('setPhoneNumber').value =
+            (num === 'Brak numeru' || /^0+$/.test(num.replace(/\D/g, ''))) ? '' : num;
         document.getElementById('setProxyX').value = phone.every_proxy_x ?? 500;
         document.getElementById('setProxyY').value = phone.every_proxy_y ?? 1000;
         document.getElementById('setTsX').value = phone.tailscale_x ?? 500;
@@ -611,6 +619,7 @@
         try {
             const body = {
                 custom_name: document.getElementById('setName').value,
+                phone_number: document.getElementById('setPhoneNumber').value.trim(),
                 every_proxy_x: Number(document.getElementById('setProxyX').value),
                 every_proxy_y: Number(document.getElementById('setProxyY').value),
                 tailscale_x: Number(document.getElementById('setTsX').value),

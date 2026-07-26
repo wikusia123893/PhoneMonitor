@@ -233,8 +233,12 @@
         </div>
 
         <div class="form-field full">
-            <label>Numer telefonu (SIM)</label>
-            <input id="setPhoneNumber" placeholder="np. +48500123456 — jeśli SIM nie podaje, wpisz ręcznie">
+            <label>Numer telefonu (ręczny — jedyne źródło)</label>
+            <input id="setPhoneNumber" placeholder="np. +48500123456">
+            <p class="hint" style="margin-top:6px;">
+                Wpisz numer SIM włożonej w TEN telefon. Agent nie zgaduje numeru (wcześniej mieszał karty).
+                SMS i tak lecą z inboxu tego urządzenia — numer to tylko etykieta na panelu.
+            </p>
         </div>
 
         <div class="form-grid">
@@ -448,6 +452,10 @@
                         </span>
                     </h2>
                     <div class="phone-number phone-num-val copyable" data-copy="" title="Kliknij lub zaznacz, żeby skopiować">📞 ---</div>
+                    <div class="num-edit-row" style="display:flex;gap:6px;margin-bottom:8px;">
+                        <input class="quick-num-input" placeholder="+48…" style="margin:0;padding:6px 8px;font-size:0.75rem;">
+                        <button type="button" class="btn-save-num" style="padding:6px 10px;font-size:0.7rem;white-space:nowrap;">💾 Numer</button>
+                    </div>
                     <div class="device-id copyable" data-copy="${safeId}" title="Kliknij, żeby skopiować ID">ID: ${safeId}</div>
                     <div class="status-grid">
                         <span class="status-badge"></span>
@@ -467,7 +475,6 @@
                         <button class="btn-action" onclick="send(this, '${safeId}','START_PROXY')">🛡️ Proxy</button>
                         <button class="btn-ip btn-action" onclick="send(this, '${safeId}','CHANGE_IP')">🚀 Zmień IP</button>
                         <button class="btn-sms" onclick="openSms('${safeId}', '${safeName}')">💬 SMS</button>
-                        <button class="btn-action" onclick="send(this, '${safeId}','DETECT_NUMBER')">📞 Wykryj numer</button>
                         <button class="btn-action" onclick="send(this, '${safeId}','REBOOT')">🔄 Restart</button>
                         <button class="btn-settings" onclick="openSettings('${safeId}')">⚙️ Ustawienia</button>
                         <button class="btn-action" onclick="send(this, '${safeId}','CALIBRATE')">🎯 Kalibruj</button>
@@ -485,8 +492,44 @@
 
             const numRaw = phone.phone_number || 'Brak numeru';
             const numEl = card.querySelector('.phone-num-val');
-            setTextIfChanged(numEl, `📞 ${numRaw}`);
+            const locked = !!phone.phone_number_manual;
+            setTextIfChanged(numEl, locked ? `📞 ${numRaw} 🔒` : `📞 ${numRaw}`);
             if (numEl) numEl.setAttribute('data-copy', numRaw === 'Brak numeru' ? '' : numRaw);
+
+            const quickIn = card.querySelector('.quick-num-input');
+            const saveNumBtn = card.querySelector('.btn-save-num');
+            if (quickIn && !quickIn.dataset.bound) {
+                quickIn.dataset.bound = '1';
+                if (numRaw !== 'Brak numeru') quickIn.value = numRaw;
+                saveNumBtn.onclick = async () => {
+                    const val = quickIn.value.trim();
+                    saveNumBtn.disabled = true;
+                    saveNumBtn.textContent = '…';
+                    try {
+                        const res = await fetch(`/devices/${phone.device_id}/settings`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                custom_name: phone.name,
+                                phone_number: val,
+                                every_proxy_x: phone.every_proxy_x ?? 500,
+                                every_proxy_y: phone.every_proxy_y ?? 1000,
+                                tailscale_x: phone.tailscale_x ?? 500,
+                                tailscale_y: phone.tailscale_y ?? 1000,
+                            })
+                        });
+                        if (!res.ok) throw new Error('HTTP ' + res.status);
+                        saveNumBtn.textContent = '✅';
+                        await loadPhones(true);
+                    } catch (e) {
+                        console.error(e);
+                        saveNumBtn.textContent = '❌';
+                    }
+                    setTimeout(() => { saveNumBtn.textContent = '💾 Numer'; saveNumBtn.disabled = false; }, 900);
+                };
+            } else if (quickIn && document.activeElement !== quickIn && numRaw !== 'Brak numeru' && !quickIn.value) {
+                quickIn.value = numRaw;
+            }
 
             const badgeAgent = card.querySelector('.status-grid span:nth-child(1)');
             const agentTxt = `Agent ${phone.online ? 'ON' : 'OFF'}`;
@@ -563,7 +606,11 @@
 
     async function openSms(deviceId, phoneName) {
         currentSmsDeviceId = deviceId;
-        document.getElementById('smsDeviceLabel').textContent = `${phoneName} · ${deviceId}`;
+        const phone = phonesCache.find(p => p.device_id === deviceId);
+        const num = (phone && phone.phone_number && phone.phone_number !== 'Brak numeru')
+            ? phone.phone_number : 'brak numeru (wpisz w Ustawieniach)';
+        document.getElementById('smsDeviceLabel').textContent =
+            `${phoneName} · ${num} · ID: ${deviceId}`;
         document.getElementById('smsModal').style.display = 'block';
         await refreshSms();
     }
@@ -618,10 +665,12 @@
         } catch (e) { console.error(e); }
     }
 
-    async function loadPhones() {
+    async function loadPhones(forceRender = false) {
         try {
-            // Nie odświeżaj DOM gdy user zaznacza / kopiuje tekst — inaczej zaznaczenie znika
-            if (Date.now() < pauseRefreshUntil || hasTextSelection()) {
+            // Nie odświeżaj DOM gdy user zaznacza / kopiuje / edytuje numer
+            const typingNum = document.activeElement && document.activeElement.classList
+                && document.activeElement.classList.contains('quick-num-input');
+            if (!forceRender && (Date.now() < pauseRefreshUntil || hasTextSelection() || typingNum)) {
                 const response = await fetch("/phones/");
                 phonesCache = await response.json();
                 return;

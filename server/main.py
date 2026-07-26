@@ -235,10 +235,22 @@ def db_update_meta(
         )
     if phone_number is not None:
         # puste = wyczyść; atrapy 0000 nie zapisujemy
+        cleaned = sanitize_phone_number(phone_number)
         cursor.execute(
             "UPDATE devices SET phone_number = ? WHERE device_id = ?",
-            (sanitize_phone_number(phone_number), device_id),
+            (cleaned, device_id),
         )
+        # Ten sam numer nie może wisieć na dwóch kartach
+        if cleaned:
+            cursor.execute(
+                "UPDATE devices SET phone_number = '' WHERE phone_number = ? AND device_id != ?",
+                (cleaned, device_id),
+            )
+            for did, st in list(DEVICES_STATE.items()):
+                if did != device_id and sanitize_phone_number(st.get("phone_number")) == cleaned:
+                    st["phone_number"] = ""
+        if device_id in DEVICES_STATE:
+            DEVICES_STATE[device_id]["phone_number"] = cleaned
     conn.commit()
     conn.close()
 
@@ -448,11 +460,9 @@ def get_phones():
                 "ip": state.get("ip", "0.0.0.0"),
                 "tailscale_ip": state.get("tailscale_ip", ""),
                 "every_proxy_address": state.get("every_proxy_address", ""),
-                "phone_number": (
-                    sanitize_phone_number(meta.get("phone_number"))
-                    or sanitize_phone_number(state.get("phone_number"))
-                    or "Brak numeru"
-                ),
+                # TYLKO ręczny numer z DB — agent nie może mieszać kart
+                "phone_number": sanitize_phone_number(meta.get("phone_number")) or "Brak numeru",
+                "phone_number_manual": bool(sanitize_phone_number(meta.get("phone_number"))),
                 "sms_count": state.get("sms_count") or len(SMS_STORE.get(dev_id, [])),
                 "every_proxy_x": meta.get("every_proxy_x", 500),
                 "every_proxy_y": meta.get("every_proxy_y", 1000),
@@ -486,12 +496,14 @@ def get_history(device_id: str):
 
 @app.post("/phones/{device_id}/sms/sync")
 async def sync_sms(device_id: str, request: Request):
+    """SMS zawsze pod device_id z URL — body.phone_number jest IGNOROWANE."""
     data = await request.json()
     ensure_runtime_state(device_id)
     messages = data.get("messages") or []
-    phone_number = sanitize_phone_number(data.get("phone_number") or "")
     normalized = []
     for m in messages:
+        if not isinstance(m, dict):
+            continue
         normalized.append(
             {
                 "id": str(m.get("id", "")),
@@ -501,27 +513,24 @@ async def sync_sms(device_id: str, request: Request):
                 "read": bool(m.get("read", False)),
             }
         )
+    # Klucz wyłącznie z path — nigdy z numeru w body
     SMS_STORE[device_id] = normalized
     DEVICES_STATE[device_id]["sms_count"] = len(normalized)
     DEVICES_STATE[device_id]["last_seen"] = time.time()
+    # Numer tylko z ręcznego wpisu w DB
     meta = db_get_device(device_id) or {}
-    override = sanitize_phone_number(meta.get("phone_number"))
-    if override:
-        DEVICES_STATE[device_id]["phone_number"] = override
-    elif phone_number:
-        DEVICES_STATE[device_id]["phone_number"] = phone_number
-    elif not sanitize_phone_number(DEVICES_STATE[device_id].get("phone_number")):
-        DEVICES_STATE[device_id]["phone_number"] = ""
+    DEVICES_STATE[device_id]["phone_number"] = sanitize_phone_number(meta.get("phone_number")) or ""
     return {"status": "ok", "count": len(normalized)}
 
 
 @app.get("/phones/{device_id}/sms")
 def get_sms(device_id: str):
     ensure_runtime_state(device_id)
+    meta = db_get_device(device_id) or {}
     msgs = SMS_STORE.get(device_id, [])
     return {
         "device_id": device_id,
-        "phone_number": DEVICES_STATE.get(device_id, {}).get("phone_number", ""),
+        "phone_number": sanitize_phone_number(meta.get("phone_number")) or "",
         "messages": msgs,
         "count": len(msgs),
     }
@@ -944,13 +953,9 @@ async def catch_all_phone_app(path: str, request: Request):
             if candidate and candidate not in ("Ładowanie...", "Loading...", "-"):
                 DEVICES_STATE[dev_id]["ip"] = candidate
 
+        # Agent NIGDY nie ustawia numeru — tylko ręczny wpis z panelu (DB)
         meta = db_get_device(dev_id) or {}
-        override = sanitize_phone_number(meta.get("phone_number"))
-        if override:
-            DEVICES_STATE[dev_id]["phone_number"] = override
-        elif "phone_number" in data:
-            cleaned = sanitize_phone_number(data.get("phone_number"))
-            DEVICES_STATE[dev_id]["phone_number"] = cleaned
+        DEVICES_STATE[dev_id]["phone_number"] = sanitize_phone_number(meta.get("phone_number")) or ""
 
         return {"status": "ok", "success": True}
     except Exception:

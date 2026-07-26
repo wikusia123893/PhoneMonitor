@@ -7,7 +7,7 @@ import shutil
 import sqlite3
 import threading
 import time
-from fastapi import FastAPI, File, Query, Request, UploadFile
+from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
@@ -1003,37 +1003,24 @@ def ota_apk():
 
 @app.post("/ota/upload")
 async def ota_upload(
-    file: UploadFile = File(...),
+    request: Request,
     version_code: int = Query(0),
     version_name: str = Query(""),
 ):
-    """Wgrywa nowy APK na serwer (z panelu). Potem UPDATE_AGENT na telefonach."""
-    if not file.filename or not file.filename.lower().endswith(".apk"):
-        return JSONResponse({"status": "error", "message": "Wybierz plik .apk"}, status_code=400)
+    """Wgrywa nowy APK (surowe body, bez python-multipart)."""
+    body = await request.body()
+    size = len(body or b"")
+    if size < 50000:
+        return JSONResponse({"status": "error", "message": "Plik za mały / pusty"}, status_code=400)
 
     os.makedirs(OTA_DIR, exist_ok=True)
     tmp_path = OTA_APK_PATH + ".tmp"
     h = hashlib.sha256()
-    size = 0
+    h.update(body)
     with open(tmp_path, "wb") as out:
-        while True:
-            chunk = await file.read(1024 * 1024)
-            if not chunk:
-                break
-            out.write(chunk)
-            h.update(chunk)
-            size += len(chunk)
-
-    if size < 50000:
-        try:
-            os.remove(tmp_path)
-        except Exception:
-            pass
-        return JSONResponse({"status": "error", "message": "Plik za mały / pusty"}, status_code=400)
-
+        out.write(body)
     shutil.move(tmp_path, OTA_APK_PATH)
 
-    # Jeśli nie podano version_code — bump względem poprzedniego
     prev = load_ota_meta()
     vc = int(version_code) if version_code and int(version_code) > 0 else int(prev.get("version_code") or 0) + 1
     vn = (version_name or "").strip() or f"1.{vc}"

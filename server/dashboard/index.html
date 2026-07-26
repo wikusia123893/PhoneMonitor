@@ -898,14 +898,16 @@
         }
         const vc = Number(document.getElementById('otaVersionCode').value || 0);
         const vn = document.getElementById('otaVersionName').value.trim();
-        const fd = new FormData();
-        fd.append('file', file);
         const qs = new URLSearchParams();
         if (vc > 0) qs.set('version_code', String(vc));
         if (vn) qs.set('version_name', vn);
         try {
             showCopyToast('Wgrywam APK…');
-            const res = await fetch('/ota/upload?' + qs.toString(), { method: 'POST', body: fd });
+            const res = await fetch('/ota/upload?' + qs.toString(), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/vnd.android.package-archive' },
+                body: file
+            });
             const data = await res.json();
             if (!res.ok || data.status === 'error') {
                 alert(data.message || 'Błąd uploadu');

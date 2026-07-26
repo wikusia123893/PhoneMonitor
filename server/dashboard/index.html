@@ -241,6 +241,17 @@
             </p>
         </div>
 
+        <div class="form-field full" style="margin-top:14px;">
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;text-transform:none;letter-spacing:0;">
+                <input id="setWakeScreen" type="checkbox" checked style="width:auto;margin:0;">
+                Komendy przy wygaszonym ekranie
+            </label>
+            <p class="hint" style="margin-top:6px;">
+                Agent budzi ekran / zdejmuje keyguard przed Proxy, Tailscale, Zmień IP itd.
+                Zostaw włączone na farmie — inaczej tap nie wejdzie na zgaszony telefon.
+            </p>
+        </div>
+
         <div class="form-grid">
             <div class="form-field">
                 <label>Every Proxy X</label>
@@ -771,6 +782,7 @@
         document.getElementById('setProxyY').value = phone.every_proxy_y ?? 1000;
         document.getElementById('setTsX').value = phone.tailscale_x ?? 500;
         document.getElementById('setTsY').value = phone.tailscale_y ?? 1000;
+        document.getElementById('setWakeScreen').checked = phone.wake_screen !== false;
         document.getElementById('settingsModal').style.display = 'block';
     }
 
@@ -784,6 +796,7 @@
             const body = {
                 custom_name: document.getElementById('setName').value,
                 phone_number: document.getElementById('setPhoneNumber').value.trim(),
+                wake_screen: document.getElementById('setWakeScreen').checked,
                 every_proxy_x: Number(document.getElementById('setProxyX').value),
                 every_proxy_y: Number(document.getElementById('setProxyY').value),
                 tailscale_x: Number(document.getElementById('setTsX').value),

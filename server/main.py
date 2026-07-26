@@ -43,6 +43,11 @@ def new_command_id() -> int:
     return int(time.time() * 1000) * 1000 + (next(CMD_SEQ) % 1000)
 
 
+def device_wake_screen(device_id: str) -> bool:
+    meta = db_get_device(device_id) or {}
+    return bool(meta.get("wake_screen", True))
+
+
 def phone_name(device_id: str) -> str:
     try:
         meta = db_get_device(device_id)
@@ -121,6 +126,7 @@ def init_db():
         ("proxy_calibrated", "INTEGER DEFAULT 0"),
         ("tailscale_calibrated", "INTEGER DEFAULT 0"),
         ("phone_number", "TEXT DEFAULT ''"),
+        ("wake_screen", "INTEGER DEFAULT 1"),
     ]:
         try:
             cursor.execute(f"ALTER TABLE devices ADD COLUMN {col} {typ}")
@@ -175,7 +181,7 @@ def db_get_device(device_id: str):
     cursor.execute('''
         SELECT custom_name, group_name, every_proxy_x, every_proxy_y, tailscale_x, tailscale_y,
                COALESCE(proxy_calibrated, 0), COALESCE(tailscale_calibrated, 0),
-               COALESCE(phone_number, '')
+               COALESCE(phone_number, ''), COALESCE(wake_screen, 1)
         FROM devices WHERE device_id = ?
     ''', (device_id,))
     row = cursor.fetchone()
@@ -192,6 +198,7 @@ def db_get_device(device_id: str):
         "proxy_calibrated": bool(row[6]),
         "tailscale_calibrated": bool(row[7]),
         "phone_number": row[8] or "",
+        "wake_screen": bool(row[9]),
     }
 
 
@@ -218,8 +225,9 @@ def db_update_meta(
     custom_name: str = None,
     group_name: str = None,
     phone_number: str = None,
+    wake_screen: bool = None,
 ):
-    """Aktualizuje nazwę, grupę i/lub ręczny numer telefonu."""
+    """Aktualizuje nazwę, grupę, ręczny numer i/lub budzenie ekranu."""
     db_register_device(device_id)
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
@@ -251,6 +259,11 @@ def db_update_meta(
                     st["phone_number"] = ""
         if device_id in DEVICES_STATE:
             DEVICES_STATE[device_id]["phone_number"] = cleaned
+    if wake_screen is not None:
+        cursor.execute(
+            "UPDATE devices SET wake_screen = ? WHERE device_id = ?",
+            (1 if wake_screen else 0, device_id),
+        )
     conn.commit()
     conn.close()
 
@@ -470,6 +483,7 @@ def get_phones():
                 "tailscale_y": meta.get("tailscale_y", 1000),
                 "proxy_calibrated": meta.get("proxy_calibrated", False),
                 "tailscale_calibrated": meta.get("tailscale_calibrated", False),
+                "wake_screen": bool(meta.get("wake_screen", True)),
             }
         )
 
@@ -550,6 +564,7 @@ def delete_sms(device_id: str, sms_id: str):
         "payload": str(sms_id),
         "executed": False,
         "created_at": time.time(),
+        "wake_screen": device_wake_screen(device_id),
     }
     with CMD_LOCK:
         COMMANDS.append(cmd)
@@ -568,6 +583,7 @@ def delete_all_sms(device_id: str):
         "payload": "ALL",
         "executed": False,
         "created_at": time.time(),
+        "wake_screen": device_wake_screen(device_id),
     }
     with CMD_LOCK:
         COMMANDS.append(cmd)
@@ -583,6 +599,8 @@ def get_device_details(device_id: str):
         "device_id": device_id,
         "name": meta["custom_name"] if meta else state.get("name"),
         "group": meta["group_name"] if meta else state.get("group", "Domyślna"),
+        "phone_number": (meta or {}).get("phone_number") or "",
+        "wake_screen": bool((meta or {}).get("wake_screen", True)),
         "every_proxy_x": meta["every_proxy_x"] if meta else 500,
         "every_proxy_y": meta["every_proxy_y"] if meta else 1000,
         "tailscale_x": meta["tailscale_x"] if meta else 500,
@@ -655,10 +673,13 @@ async def set_device_settings(device_id: str, request: Request):
     custom_name = data.get("custom_name")
     group_name = data.get("group_name")
     phone_number = data.get("phone_number")
-    px_x = int(data.get("every_proxy_x", 500))
-    px_y = int(data.get("every_proxy_y", 1000))
-    ts_x = int(data.get("tailscale_x", 500))
-    ts_y = int(data.get("tailscale_y", 1000))
+    wake_screen = data.get("wake_screen")
+    # Zachowaj stare współrzędne przy szybkim zapisie samego numeru
+    current = db_get_device(device_id) or {}
+    px_x = int(data["every_proxy_x"]) if "every_proxy_x" in data else int(current.get("every_proxy_x", 500))
+    px_y = int(data["every_proxy_y"]) if "every_proxy_y" in data else int(current.get("every_proxy_y", 1000))
+    ts_x = int(data["tailscale_x"]) if "tailscale_x" in data else int(current.get("tailscale_x", 500))
+    ts_y = int(data["tailscale_y"]) if "tailscale_y" in data else int(current.get("tailscale_y", 1000))
 
     db_register_device(device_id)
     db_update_meta(
@@ -666,6 +687,7 @@ async def set_device_settings(device_id: str, request: Request):
         custom_name=custom_name,
         group_name=group_name,
         phone_number=phone_number if phone_number is not None else None,
+        wake_screen=bool(wake_screen) if wake_screen is not None else None,
     )
     db_update_coords(
         device_id,
@@ -685,12 +707,14 @@ async def set_device_settings(device_id: str, request: Request):
     if phone_number is not None:
         state["phone_number"] = sanitize_phone_number(phone_number)
 
+    meta = db_get_device(device_id) or {}
     return {
         "status": "ok",
         "device_id": device_id,
         "name": state["name"],
         "group": state["group"],
         "phone_number": state.get("phone_number") or "",
+        "wake_screen": bool(meta.get("wake_screen", True)),
         "every_proxy_x": px_x,
         "every_proxy_y": px_y,
         "tailscale_x": ts_x,
@@ -768,6 +792,9 @@ async def add_command(request: Request):
     elif cmd == "START_TAILSCALE":
         data["tap_x"] = coords["tailscale_x"]
         data["tap_y"] = coords["tailscale_y"]
+
+    # Budzenie ekranu przed komendą (per telefon, domyślnie ON)
+    data["wake_screen"] = device_wake_screen(dev_id)
 
     if dev_id in DEVICES_STATE:
         DEVICES_STATE[dev_id]["last_seen"] = time.time()
@@ -888,6 +915,7 @@ async def command_done(request: Request):
                     "payload": "",
                     "executed": False,
                     "created_at": time.time(),
+                    "wake_screen": device_wake_screen(device_id),
                 }
                 with CMD_LOCK:
                     COMMANDS.append(retry_cmd)

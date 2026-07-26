@@ -33,6 +33,7 @@ IN_FLIGHT = {}  # device_id -> komenda aktualnie u telefonu
 CMD_LOCK = threading.RLock()
 CMD_SEQ = itertools.count(1)
 DEVICES_STATE = {}
+SMS_STORE = {}  # device_id -> list[dict]
 
 # Komendy UI nie mogą się nakładać — inaczej Proxy/Tailscale/Kalibracja się mieszają
 UI_COMMANDS = {"START_PROXY", "START_TAILSCALE", "CALIBRATE"}
@@ -273,10 +274,14 @@ def ensure_runtime_state(device_id: str, default_name: str = None):
             "ip": "0.0.0.0",
             "tailscale_ip": "",
             "every_proxy_address": "",
+            "phone_number": "",
+            "sms_count": 0,
         }
     else:
         DEVICES_STATE[device_id]["name"] = name
         DEVICES_STATE[device_id]["group"] = group
+        DEVICES_STATE[device_id].setdefault("phone_number", "")
+        DEVICES_STATE[device_id].setdefault("sms_count", 0)
 
     return DEVICES_STATE[device_id]
 
@@ -339,7 +344,7 @@ def get_phones():
     for dev_id, state in DEVICES_STATE.items():
         ensure_runtime_state(dev_id)
         meta = db_get_device(dev_id) or {}
-        is_online = (now - state["last_seen"]) < 40
+        is_online = (now - state["last_seen"]) < 25
         phones_list.append(
             {
                 "device_id": dev_id,
@@ -353,6 +358,8 @@ def get_phones():
                 "ip": state.get("ip", "0.0.0.0"),
                 "tailscale_ip": state.get("tailscale_ip", ""),
                 "every_proxy_address": state.get("every_proxy_address", ""),
+                "phone_number": state.get("phone_number") or "Brak numeru",
+                "sms_count": state.get("sms_count") or len(SMS_STORE.get(dev_id, [])),
                 "every_proxy_x": meta.get("every_proxy_x", 500),
                 "every_proxy_y": meta.get("every_proxy_y", 1000),
                 "tailscale_x": meta.get("tailscale_x", 500),
@@ -374,6 +381,81 @@ def get_history(device_id: str):
         "proxy": [{"old_ip": "-", "new_ip": DEVICES_STATE.get(device_id, {}).get("ip", "-")}],
         "tailscale": [],
     }
+
+
+@app.post("/phones/{device_id}/sms/sync")
+async def sync_sms(device_id: str, request: Request):
+    data = await request.json()
+    ensure_runtime_state(device_id)
+    messages = data.get("messages") or []
+    phone_number = data.get("phone_number") or ""
+    normalized = []
+    for m in messages:
+        normalized.append(
+            {
+                "id": str(m.get("id", "")),
+                "address": m.get("address") or "",
+                "body": m.get("body") or "",
+                "date": int(m.get("date") or 0),
+                "read": bool(m.get("read", False)),
+            }
+        )
+    SMS_STORE[device_id] = normalized
+    DEVICES_STATE[device_id]["sms_count"] = len(normalized)
+    DEVICES_STATE[device_id]["last_seen"] = time.time()
+    if phone_number:
+        DEVICES_STATE[device_id]["phone_number"] = phone_number
+    return {"status": "ok", "count": len(normalized)}
+
+
+@app.get("/phones/{device_id}/sms")
+def get_sms(device_id: str):
+    ensure_runtime_state(device_id)
+    msgs = SMS_STORE.get(device_id, [])
+    return {
+        "device_id": device_id,
+        "phone_number": DEVICES_STATE.get(device_id, {}).get("phone_number", ""),
+        "messages": msgs,
+        "count": len(msgs),
+    }
+
+
+@app.delete("/phones/{device_id}/sms/{sms_id}")
+def delete_sms(device_id: str, sms_id: str):
+    ensure_runtime_state(device_id)
+    # Optymistycznie z panelu
+    SMS_STORE[device_id] = [m for m in SMS_STORE.get(device_id, []) if str(m.get("id")) != str(sms_id)]
+    DEVICES_STATE[device_id]["sms_count"] = len(SMS_STORE[device_id])
+    # Komenda do telefonu
+    cmd = {
+        "id": new_command_id(),
+        "device_id": device_id,
+        "command": "DELETE_SMS",
+        "payload": str(sms_id),
+        "executed": False,
+        "created_at": time.time(),
+    }
+    with CMD_LOCK:
+        COMMANDS.append(cmd)
+    return {"status": "ok", "queued": cmd["id"], "count": len(SMS_STORE[device_id])}
+
+
+@app.delete("/phones/{device_id}/sms")
+def delete_all_sms(device_id: str):
+    ensure_runtime_state(device_id)
+    SMS_STORE[device_id] = []
+    DEVICES_STATE[device_id]["sms_count"] = 0
+    cmd = {
+        "id": new_command_id(),
+        "device_id": device_id,
+        "command": "DELETE_SMS",
+        "payload": "ALL",
+        "executed": False,
+        "created_at": time.time(),
+    }
+    with CMD_LOCK:
+        COMMANDS.append(cmd)
+    return {"status": "ok", "queued": cmd["id"]}
 
 
 @app.get("/devices/{device_id}")
@@ -737,6 +819,8 @@ async def catch_all_phone_app(path: str, request: Request):
             "every_proxy",
             "every_proxy_address",
             "online",
+            "phone_number",
+            "sms_count",
         ]:
             if key in data:
                 DEVICES_STATE[dev_id][key] = data[key]

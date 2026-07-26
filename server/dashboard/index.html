@@ -51,49 +51,63 @@
         h1 { font-size: 2.5rem; font-weight: 700; letter-spacing: 3px; color: #fff; margin: 0; text-shadow: 0 0 25px var(--accent-glow), 0 0 50px rgba(236, 72, 153, 0.4); }
 
         #phones { 
-            display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); 
-            gap: 35px; padding: 40px; max-width: 1300px; margin: 0 auto; position: relative; z-index: 10;
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); 
+            gap: 18px; padding: 24px 28px 40px; max-width: 1400px; margin: 0 auto; position: relative; z-index: 10;
         }
 
         @keyframes cardAppear { 0% { opacity: 0; transform: translateY(40px) scale(0.95); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
         
         .card { 
             background: var(--card-glass); backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
-            border: 1px solid rgba(255, 255, 255, 0.15); padding: 35px; border-radius: 40px;
-            transition: all 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
-            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), inset 0 0 20px rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.15); padding: 18px 18px 16px; border-radius: 22px;
+            transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4), inset 0 0 20px rgba(255, 255, 255, 0.04);
             animation: cardAppear 0.6s ease-out forwards;
         }
 
-        .card:hover { transform: scale(1.02); border-color: rgba(168, 85, 247, 0.8); }
-        h2 { margin: 0 0 8px 0; font-size: 1.35rem; color: #fff; display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
-        .phone-title { display: flex; flex-direction: column; gap: 4px; }
-        .device-id { font-size: 0.7rem; opacity: 0.45; word-break: break-all; margin-bottom: 14px; }
+        .card:hover { transform: scale(1.015); border-color: rgba(168, 85, 247, 0.8); }
+        h2 { margin: 0 0 4px 0; font-size: 1.05rem; color: #fff; display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+        .phone-title { display: flex; flex-direction: column; gap: 2px; }
+        .device-id { font-size: 0.62rem; opacity: 0.4; word-break: break-all; margin-bottom: 8px; }
+        .phone-number { font-size: 0.82rem; color: var(--cyan); font-weight: 600; margin-bottom: 8px; }
         
-        .status-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 25px; }
+        .status-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
         .status-badge { 
-            padding: 8px 16px; border-radius: 20px; font-size: 0.75rem; font-weight: 600;
-            display: flex; align-items: center; gap: 6px; text-transform: uppercase;
+            padding: 5px 10px; border-radius: 14px; font-size: 0.65rem; font-weight: 600;
+            display: flex; align-items: center; gap: 4px; text-transform: uppercase;
             transition: background 0.3s ease;
         }
         
         .on { background: linear-gradient(135deg, #22c55e, #16a34a); color: #fff; }
         .off { background: rgba(255, 255, 255, 0.08); color: #aaa; }
         
-        .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 20px; }
+        .info-box {
+            font-size: 0.78rem; opacity: 0.92; margin-bottom: 12px; line-height: 1.55;
+            background: rgba(0,0,0,0.25); padding: 10px 12px; border-radius: 14px;
+        }
+        .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
         .btn-grid .btn-ip { grid-column: span 2; }
         button { 
-            padding: 14px; border: none; border-radius: 18px; cursor: pointer; font-weight: 600; font-size: 0.8rem;
-            background: rgba(255,255,255,0.08); color: white; transition: all 0.3s; border: 1px solid rgba(255,255,255,0.1);
+            padding: 9px 8px; border: none; border-radius: 12px; cursor: pointer; font-weight: 600; font-size: 0.72rem;
+            background: rgba(255,255,255,0.08); color: white; transition: all 0.25s; border: 1px solid rgba(255,255,255,0.1);
         }
-        button:hover:not(:disabled) { background: var(--accent); transform: translateY(-2px); }
+        button:hover:not(:disabled) { background: var(--accent); transform: translateY(-1px); }
         button:disabled { opacity: 0.3; cursor: not-allowed; transform: none !important; }
         .btn-ip { grid-column: span 2; background: linear-gradient(135deg, #03dac6, #00b3a6); color: #000; font-weight: 700; }
         .btn-settings { background: rgba(236, 72, 153, 0.2); border-color: rgba(236, 72, 153, 0.4); }
+        .btn-sms { background: rgba(3, 218, 198, 0.18); border-color: rgba(3, 218, 198, 0.4); }
+        .sms-item { background: rgba(255,255,255,0.04); padding: 12px 14px; border-radius: 12px; margin-bottom: 8px; border: 1px solid rgba(255,255,255,0.06); }
+        .sms-from { color: var(--cyan); font-weight: 600; font-size: 0.85rem; }
+        .sms-date { opacity: 0.55; font-size: 0.7rem; float: right; }
+        .sms-body { margin-top: 8px; font-size: 0.85rem; white-space: pre-wrap; word-break: break-word; }
+        .sms-actions { margin-top: 10px; text-align: right; }
+        .sms-actions button { padding: 6px 10px; font-size: 0.7rem; background: rgba(239,68,68,0.25); border-color: rgba(239,68,68,0.45); }
+        #smsContent { max-height: 420px; overflow-y: auto; margin-top: 12px; }
+        .modal-content.wide { max-width: 560px; }
 
         input, select { 
-            width: 100%; padding: 14px 18px; border-radius: 18px; border: 1px solid rgba(255,255,255,0.15); 
-            margin-top: 18px; background: rgba(0,0,0,0.4); color: white; font-family: inherit;
+            width: 100%; padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.15); 
+            margin-top: 10px; background: rgba(0,0,0,0.4); color: white; font-family: inherit; font-size: 0.8rem;
         }
 
         .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -182,6 +196,19 @@
     </div>
 </div>
 
+<div id="smsModal" class="modal">
+    <div class="modal-content wide">
+        <span style="float:right; cursor:pointer;" onclick="closeModal('smsModal')">✕</span>
+        <h2 style="margin-bottom: 6px;">💬 SMS</h2>
+        <div class="device-id" id="smsDeviceLabel"></div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
+            <button type="button" onclick="refreshSms()">🔄 Odśwież</button>
+            <button type="button" style="background: rgba(239,68,68,0.25); border-color: rgba(239,68,68,0.45);" onclick="deleteAllSms()">🗑️ Usuń wszystkie</button>
+        </div>
+        <div id="smsContent">Ładowanie...</div>
+    </div>
+</div>
+
 <div id="settingsModal" class="modal">
     <div class="modal-content">
         <span style="float:right; cursor:pointer;" onclick="closeModal('settingsModal')">✕</span>
@@ -224,6 +251,7 @@
 <script>
     let phonesCache = [];
     let currentSettingsDeviceId = null;
+    let currentSmsDeviceId = null;
     let queueOpen = false;
     let queueCache = { pending: [], running: [], count: 0 };
     const sendLocks = new Set(); // device_id:command — anty-spam kliknięć
@@ -337,35 +365,39 @@
                             <span class="phone-name">📱 ${safeName}</span>
                         </span>
                     </h2>
+                    <div class="phone-number phone-num-val">📞 ---</div>
                     <div class="device-id">ID: ${safeId}</div>
                     <div class="status-grid">
                         <span class="status-badge"></span>
                         <span class="status-badge"></span>
                         <span class="status-badge"></span>
                     </div>
-                    <div style="font-size: 0.95rem; opacity: 0.9; margin-bottom: 20px; line-height: 1.8; background: rgba(0,0,0,0.25); padding: 15px 20px; border-radius: 20px;">
+                    <div class="info-box">
                         <div>🔋 Bateria: <b class="battery-val"></b></div>
-                        <div>🌡️ Temperatura: <b class="temp-val"></b></div>
-                        <div>📶 IP (SIM): <b class="ip-val"></b></div>
-                        <div>🔒 IP (Tailscale): <b class="ts-ip-val" style="color: var(--cyan);"></b></div>
+                        <div>🌡️ Temp: <b class="temp-val"></b></div>
+                        <div>📶 IP SIM: <b class="ip-val"></b></div>
+                        <div>🔒 Tailscale: <b class="ts-ip-val" style="color: var(--cyan);"></b></div>
                         <div>🛡️ Proxy: <b class="proxy-val" style="color: var(--cyan);"></b></div>
+                        <div>💬 SMS: <b class="sms-count-val"></b></div>
                     </div>
                     <div class="btn-grid">
                         <button class="btn-action" onclick="send(this, '${safeId}','START_TAILSCALE')">⚡ Tailscale</button>
                         <button class="btn-action" onclick="send(this, '${safeId}','START_PROXY')">🛡️ Proxy</button>
                         <button class="btn-ip btn-action" onclick="send(this, '${safeId}','CHANGE_IP')">🚀 Zmień IP</button>
+                        <button class="btn-sms" onclick="openSms('${safeId}', '${safeName}')">💬 SMS</button>
                         <button class="btn-action" onclick="send(this, '${safeId}','REBOOT')">🔄 Restart</button>
                         <button class="btn-settings" onclick="openSettings('${safeId}')">⚙️ Ustawienia</button>
                         <button class="btn-action" onclick="send(this, '${safeId}','CALIBRATE')">🎯 Kalibruj</button>
                         <button style="background: rgba(168, 85, 247, 0.25);" onclick="showHistory('${safeId}', '${safeName}')">📊 Historia</button>
                     </div>
-                    <input id="cmd_${safeId}" placeholder="💻 Komenda shell...">
-                    <button class="btn-action" style="width:100%; margin-top:15px; background: linear-gradient(135deg, #a855f7, #7e22ce);" onclick="sendShell(this, '${safeId}')">WYŚLIJ KOMENDĘ</button>
+                    <input id="cmd_${safeId}" placeholder="💻 Shell...">
+                    <button class="btn-action" style="width:100%; margin-top:8px; background: linear-gradient(135deg, #a855f7, #7e22ce);" onclick="sendShell(this, '${safeId}')">WYŚLIJ</button>
                 `;
                 container.appendChild(card);
             }
 
             card.querySelector('.phone-name').innerHTML = `📱 ${safeName}`;
+            card.querySelector('.phone-num-val').textContent = `📞 ${phone.phone_number || 'Brak numeru'}`;
 
             const badgeAgent = card.querySelector('.status-grid span:nth-child(1)');
             badgeAgent.className = `status-badge ${phone.online ? 'on' : 'off'}`;
@@ -384,6 +416,7 @@
             const ipEl = card.querySelector('.ip-val');
             const tsIpEl = card.querySelector('.ts-ip-val');
             const proxyValEl = card.querySelector('.proxy-val');
+            const smsCountEl = card.querySelector('.sms-count-val');
             const actionBtns = card.querySelectorAll('.btn-action');
 
             if (!phone.online) {
@@ -392,12 +425,13 @@
                 batteryEl.innerText = "OFFLINE";
                 batteryEl.style.color = "#ef4444";
                 tempEl.innerText = "---";
-                ipEl.innerText = "Brak połączenia (Rozłączony)";
+                ipEl.innerText = "Brak połączenia";
                 ipEl.style.color = "#ef4444";
                 tsIpEl.innerText = "---";
                 tsIpEl.style.color = "#ef4444";
                 proxyValEl.innerText = "---";
                 proxyValEl.style.color = "#ef4444";
+                smsCountEl.innerText = "---";
                 actionBtns.forEach(b => b.disabled = true);
             } else {
                 card.style.opacity = "1";
@@ -407,13 +441,68 @@
                 tempEl.innerText = phone.battery_temp ? phone.battery_temp + '°C' : '---';
                 ipEl.innerText = phone.ip || "-";
                 ipEl.style.color = "var(--cyan)";
-                tsIpEl.innerText = phone.tailscale_ip || "Brak / Wyłączone";
+                tsIpEl.innerText = phone.tailscale_ip || "Wyłączone";
                 tsIpEl.style.color = "var(--cyan)";
                 proxyValEl.innerText = phone.every_proxy_address || "Wyłączone";
                 proxyValEl.style.color = "var(--cyan)";
+                smsCountEl.innerText = String(phone.sms_count ?? 0);
                 actionBtns.forEach(b => b.disabled = false);
             }
         }
+    }
+
+    async function openSms(deviceId, phoneName) {
+        currentSmsDeviceId = deviceId;
+        document.getElementById('smsDeviceLabel').textContent = `${phoneName} · ${deviceId}`;
+        document.getElementById('smsModal').style.display = 'block';
+        await refreshSms();
+    }
+
+    async function refreshSms() {
+        if (!currentSmsDeviceId) return;
+        const el = document.getElementById('smsContent');
+        el.innerHTML = 'Ładowanie SMS...';
+        try {
+            const res = await fetch('/phones/' + currentSmsDeviceId + '/sms');
+            const data = await res.json();
+            const msgs = data.messages || [];
+            if (!msgs.length) {
+                el.innerHTML = "<div style='text-align:center; opacity:0.6; padding:20px;'>Brak SMS na telefonie.</div>";
+                return;
+            }
+            el.innerHTML = msgs.map(m => {
+                const when = m.date ? new Date(Number(m.date)).toLocaleString('pl-PL') : '';
+                return `<div class="sms-item">
+                    <div><span class="sms-from">${escapeHtml(m.address || '?')}</span>
+                    <span class="sms-date">${escapeHtml(when)}</span></div>
+                    <div class="sms-body">${escapeHtml(m.body || '')}</div>
+                    <div class="sms-actions">
+                        <button type="button" onclick="deleteSms('${escapeHtml(m.id)}')">🗑️ Usuń</button>
+                    </div>
+                </div>`;
+            }).join('');
+        } catch (e) {
+            el.innerHTML = 'Błąd pobierania SMS.';
+        }
+    }
+
+    async function deleteSms(smsId) {
+        if (!currentSmsDeviceId) return;
+        try {
+            await fetch(`/phones/${currentSmsDeviceId}/sms/${smsId}`, { method: 'DELETE' });
+            await refreshSms();
+            loadPhones();
+        } catch (e) { console.error(e); }
+    }
+
+    async function deleteAllSms() {
+        if (!currentSmsDeviceId) return;
+        if (!confirm('Usunąć wszystkie SMS z tego telefonu?')) return;
+        try {
+            await fetch(`/phones/${currentSmsDeviceId}/sms`, { method: 'DELETE' });
+            await refreshSms();
+            loadPhones();
+        } catch (e) { console.error(e); }
     }
 
     async function loadPhones() {
@@ -550,7 +639,7 @@
     function closeModal(id) { document.getElementById(id).style.display = "none"; }
     
     loadPhones();
-    setInterval(loadPhones, 2000);
+    setInterval(loadPhones, 1000);
 </script>
 </body>
 </html>

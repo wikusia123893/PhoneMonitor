@@ -457,7 +457,16 @@ def record_ip_change(device_id: str, new_ip: str, force: bool = False) -> bool:
 async def get_dashboard():
     try:
         with open(INDEX_PATH, "r", encoding="utf-8") as f:
-            return HTMLResponse(f.read())
+            html = f.read()
+        # Bez cache — inaczej po deploy widać starą stronę
+        return HTMLResponse(
+            html,
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
     except FileNotFoundError:
         return HTMLResponse(f"❌ Błąd: Brak pliku {INDEX_PATH}", status_code=404)
 
